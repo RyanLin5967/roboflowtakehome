@@ -1,0 +1,16 @@
+{
+  "authenticate": {
+    "ok": true,
+    "projects": 2
+  },
+  "plan": {
+    "is_enterprise": false,
+    "is_pro": false,
+    "is_trial": false,
+    "over_quota": false
+  },
+  "usage": {
+    "error_type": "RoboflowError",
+    "detail": "{\"error\":\"Billing usage reports are only available for workspaces with folder billing enabled\"}"
+  }
+}

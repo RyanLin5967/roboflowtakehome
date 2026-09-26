@@ -1,0 +1,53 @@
+name: Verify Counterpart
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: counterpart_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      COUNTERPART_TEST_DSN: postgresql://postgres:postgres@127.0.0.1:5432/counterpart_test
+      COUNTERPART_LIVE_ENABLED: "false"
+      COUNTERPART_EXPORT_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.3"
+          python-version: "3.12"
+          enable-cache: true
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: uv sync --locked
+      - run: uv run ruff check src tests scripts
+      - run: uv run pytest -q
+      - run: uv build --wheel
+      - run: npm --prefix web ci
+      - run: npm --prefix web run build
+      - run: npx playwright install --with-deps chromium
+        working-directory: web
+      - run: npm test
+        working-directory: web
+      - name: Browser against real API and worker
+        run: |
+          export COUNTERPART_DATABASE_URL="$COUNTERPART_TEST_DSN"
+          uv run counterpart serve > /tmp/counterpart-api.log 2>&1 &
+          counterpart_api_pid=$!
+          uv run counterpart worker > /tmp/counterpart-worker.log 2>&1 &
+          counterpart_worker_pid=$!
+          trap 'kill "$counterpart_api_pid" "$counterpart_worker_pid" 2>/dev/null || true' EXIT
+          node scripts/browser_smoke.mjs
