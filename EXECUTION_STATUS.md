@@ -1,4 +1,12 @@
-# Counterpart full software build complete; camera trial deferred — 2026-09-26
+# Correction: original-scope audit found remaining work — 2026-09-26
+
+The user challenged the claim that everything from the original description was done. Root and two independent agents checked the original descriptions against source and evidence. **That completion claim was too broad.** The substantial tested build below is real, but does not cover every original capability. [Original-scope audit](docs/ORIGINAL_SCOPE_AUDIT.md) is the current authority for remaining work.
+
+Concrete infrastructure gaps: pin model/configuration to the collection/session contract (current workers can change it), append new decision revisions when saved evidence is re-verified, group related sessions in dataset splits, and measure feedback age/p95 versus a bounded-queue baseline under increasing load. Broader camera registration/object-identity/distractor checks and Roboflow annotation/version integration were narrowed or omitted. The manual physical trial remains deferred by the user. No application fixes or new provider calls occurred during this audit. Preserve existing completed test evidence; do not reinterpret these gaps as failed execution of tests that passed.
+
+---
+
+# Previous completion checkpoint (scope claim superseded above)
 
 The user requested the complete product, then explicitly instructed us to do everything except their manual physical-camera trial. The operator→collector→repair→review→dataset-release→offline-consumer product and its reliability/security/storage/deployment work are implemented and tested. `BUILD_LOOP.json` records completion of all independently executable gates. Do not restart ideation or resume the unrelated paused CoverageCV goal.
 

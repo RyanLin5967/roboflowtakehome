@@ -1,5 +1,7 @@
 # Full-product verification — 2026-09-26
 
+**Scope correction:** these executed tests cover the implemented product. A subsequent [audit against the original proposal](ORIGINAL_SCOPE_AUDIT.md) found remaining capabilities and infrastructure work; the passing counts below do not establish full original-scope completion.
+
 The complete collection→capture/repair→review→release→offline-consumer workflow is implemented. The following are executed checks, not planned gates. Machine perception, synthetic tests and physical validation remain separate.
 
 | Layer | Current executed result | Scope |

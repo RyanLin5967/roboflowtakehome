@@ -35,6 +35,8 @@ Not a general crowdsourcing marketplace, causal inference engine, new detector, 
 
 ## Completion evidence — 2026-09-26
 
+**Superseded completion boundary:** the later [original-scope audit](../ORIGINAL_SCOPE_AUDIT.md) found concrete work omitted from this narrower contract, including model pinning, re-verification revisions, related-session splits and the feedback benchmark. Do not treat the executed gates below as proof that every original promise is finished.
+
 All independently executable software gates passed: 752 Python tests with no skips, 17 browser tests, actual spatial/temporal product journeys, independent release consumption, abrupt worker failures, database backup/restore, S3 HTTP adapter faults and an actual isolated container build/start/restart with compiled mobile-browser checks. See [the validation report](../VALIDATION_REPORT.md) and [container evidence](../../research/deployment_probe.json). The disposable VM, containers, volumes and test secrets were removed afterward.
 
 The user explicitly deferred the physical-camera trial and instructed completion of everything else. That trial is excluded from the current completion boundary; no collection-quality claim follows from software completion. Public hosting/remote CI need publication, and live private Roboflow camera export needs private-project entitlement. The software and runbooks for those paths are delivered; external execution is not claimed.

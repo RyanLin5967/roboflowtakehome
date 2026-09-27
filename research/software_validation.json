@@ -1,7 +1,7 @@
 {
   "schema_version": "counterpart.software-validation.v1",
   "recorded_at": "2026-09-27T00:41:21.626964+00:00",
-  "scope": "Full product implementation and isolated local container deployment; physical camera trial deferred by user, external hosting/provider gates separate",
+  "scope": "Executed verification of implemented features and isolated local container deployment; not proof of complete original proposal. See docs/ORIGINAL_SCOPE_AUDIT.md.",
   "python": {
     "passed": 752,
     "skipped": 0,
@@ -112,5 +112,11 @@
     "compiled_mobile_browser": true,
     "cloud_calls": 0,
     "disposable_environment_removed": true
+  },
+  "original_scope_audit": {
+    "all_original_capabilities_complete": false,
+    "report": "docs/ORIGINAL_SCOPE_AUDIT.md",
+    "existing_test_evidence_unchanged": true,
+    "application_fixes_during_audit": false
   }
 }

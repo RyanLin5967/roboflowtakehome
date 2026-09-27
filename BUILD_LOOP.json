@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "project": "Counterpart",
-  "status": "complete_with_user_deferred_physical_validation",
+  "status": "incomplete_original_scope",
   "authorized": "2026-09-26: user explicitly requested a persistent loop until the whole product is built",
   "objective": "Complete the operator-to-collector-to-reviewed-dataset product and its necessary reliable infrastructure; prove each acceptance gate with executed evidence.",
   "orchestrator_note": "Native create_goal was refused because this thread still has a paused unfinished CoverageCV goal. Do not falsely complete or resume that unrelated goal. This separate durable loop tracks Counterpart; it does not claim automatic execution after the session closes.",
@@ -22,7 +22,7 @@
     "No invented benchmarks",
     "No unrelated CoverageCV work"
   ],
-  "current_cycle": "All independently executable software and local deployment gates passed; final evidence saved and disposable environment removed.",
+  "current_cycle": "Original-scope audit completed; missing implementation/benchmark work recorded in docs/ORIGINAL_SCOPE_AUDIT.md. No fixes claimed during audit.",
   "gates": {
     "research_and_original_capture_kernel": "verified checkpoint a51fa31; not complete product",
     "operator_campaign_and_invites": "verified software implementation; see research/software_validation.json and docs/VALIDATION_REPORT.md",
@@ -48,12 +48,21 @@
       "temporal"
     ]
   },
-  "completed_at": "2026-09-27T00:41:21.626568+00:00",
   "user_scope_update": "User explicitly said to do everything except the manual physical-camera trial; that trial is deferred, not a blocking software gate.",
   "external_unexecuted": [
     "Physical camera study deferred by user",
     "Private Roboflow camera export requires private-project entitlement",
     "Public hosting/TLS and remote CI have not been requested or executed",
     "Hosted S3 provider compatibility not exercised; actual local HTTP emulator passed"
+  ],
+  "previous_completion_claim_at": "2026-09-27T00:41:21.626568+00:00",
+  "completion_correction": "The prior completed status covered a narrower implementation contract, not all original promises. Physical camera testing remains explicitly deferred, but independent code and benchmark gaps remain.",
+  "remaining_implementation": [
+    "Pin model/configuration to a collection/session and refuse incompatible continuation",
+    "Append immutable new-verifier decisions over saved evidence without rewriting prior results",
+    "Support explicit grouping of related sessions across dataset partitions",
+    "Measure end-to-end feedback freshness/p95 under increasing offered load against a bounded-queue baseline",
+    "Address or explicitly reconcile narrowed camera registration, extra-distractor and instance checks",
+    "Address or explicitly reconcile uncertain-attempt review and Roboflow annotation/dataset-version integration"
   ]
 }
