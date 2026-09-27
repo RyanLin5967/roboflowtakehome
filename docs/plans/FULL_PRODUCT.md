@@ -32,3 +32,9 @@ The user explicitly rejected treating the initial capture kernel as the full pro
 ## Boundaries
 
 Not a general crowdsourcing marketplace, causal inference engine, new detector, or arbitrary natural-language verifier. Two well-tested parameterized recipes can satisfy the product if the complete collection/review/release path is real. We do not build a dozen weak demos to inflate scope. No public deployment, private dataset entitlement or physical observations are fabricated when external access is missing.
+
+## Completion evidence — 2026-09-26
+
+All independently executable software gates passed: 752 Python tests with no skips, 17 browser tests, actual spatial/temporal product journeys, independent release consumption, abrupt worker failures, database backup/restore, S3 HTTP adapter faults and an actual isolated container build/start/restart with compiled mobile-browser checks. See [the validation report](../VALIDATION_REPORT.md) and [container evidence](../../research/deployment_probe.json). The disposable VM, containers, volumes and test secrets were removed afterward.
+
+The user explicitly deferred the physical-camera trial and instructed completion of everything else. That trial is excluded from the current completion boundary; no collection-quality claim follows from software completion. Public hosting/remote CI need publication, and live private Roboflow camera export needs private-project entitlement. The software and runbooks for those paths are delivered; external execution is not claimed.

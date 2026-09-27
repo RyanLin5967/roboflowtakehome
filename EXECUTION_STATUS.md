@@ -1,31 +1,35 @@
-# Counterpart full product: software verified; external gates open — 2026-09-26
+# Counterpart full software build complete; camera trial deferred — 2026-09-26
 
-User explicitly required the whole product and a persistent loop. The initial kernel was not completion. This expansion now implements the complete operator→collector→repair→review→dataset-release→offline-consumer path plus the necessary reliability/security/storage/operations. Follow `BUILD_LOOP.json` for the remaining gates; do not restart ideation or confuse the old CoverageCV goal with Counterpart.
+The user requested the complete product, then explicitly instructed us to do everything except their manual physical-camera trial. The operator→collector→repair→review→dataset-release→offline-consumer product and its reliability/security/storage/deployment work are implemented and tested. `BUILD_LOOP.json` records completion of all independently executable gates. Do not restart ideation or resume the unrelated paused CoverageCV goal.
 
 ## Executed final checks
 
-- **752** Python tests passed with COUNTERPART_TEST_DSN set; zero skipped.
-- **17** browser interaction tests passed; production TypeScript/Vite build, Ruff, wheel and diff checks passed.
-- Actual API/Postgres/worker browser scripts passed both spatial and temporal: separate collector contexts, incomplete session retained, rejection/repair/reload, human-review action, release/download,390 px layout. Both downloaded fixture releases passed independent offline integrity validation.
-- Actual worker-death probe:8 synthetic collectors/2 campaigns,85 previews coalesced to8 pending;7 others progress while deadworker lease lives;10 durable frame results recovered with zero extra fake HTTP requests/reservations.
-- S3 HTTP emulator concurrency/corruption/lost-response tests and actual pg_dump/pg_restore of a complete pair/review/release passed. Docker configuration was parsed; daemon unavailable, so build/boot/TLS not claimed.
-- Actual hosted six-photo probe:6/6 published source spatial relations,3/3 invalid moved-reference pairs rejected. Dev budget ledger 8/512. This is not general accuracy or a physical collection trial. No local ML or Modal used.
+- **752 Python tests passed**, zero skipped, with the real PostgreSQL test DSN.
+- **17 browser interaction tests passed**; production TypeScript/Vite build, Ruff, Python wheel and diff checks passed.
+- Actual API/Postgres/worker browser scripts passed both spatial and temporal recipes: separate collectors, incomplete-session inspection, rejection/repair/reload, human review, release/download and 390 px layout. Both downloaded fixture releases passed the independent offline consumer.
+- Actual worker-death probe: 8 synthetic collectors/2 campaigns; 85 previews coalesced to 8 pending, all latest frames served. Seven other collectors progressed while the dead worker's lease remained. Ten durable frame observations survived process death with zero additional fake HTTP calls/reservations.
+- S3 HTTP emulator concurrency/corruption/lost-response checks and real pg_dump/pg_restore of a complete pair, review, release, capability and usage ledger passed.
+- **Actual isolated container deployment passed**: locked image built, PostgreSQL/API/worker booted, authenticated collection/review/release worked, worker SIGKILL and full service restart preserved evidence and queued work. Real Chromium at 390 px rendered the compiled app and downloaded the 71,123-byte dataset without errors or horizontal overflow. No provider keys or model calls in this test. See `research/deployment_probe.json` for exact image/source identities.
+- Disposable `counterpart-test` containers, volumes, VM and generated credentials/tools were removed. Existing stopped `dbprobe` profile and native app on port 8080 were left untouched.
+- Actual hosted six-photo diagnostic: 6/6 published source spatial relations, 3/3 invalid moved-reference pairs refused. The durable dev budget is 8/512 image reservations. This is limited perception evidence, not a physical collection study. No local ML or Modal used.
 
-## Remaining external evidence/access
+## Deferred and external checks
 
-1. Real physical collector trial/positive fixed-reference and temporal quality: user has been asked to try the running camera flow. Keep all attempts and use frozen independent protocol; do not manufacture evidence or infer quality from fixtures.
-2. Private Roboflow camera export: this workspace is public-only. Public generated-card integration project remains test-only; automatic camera export stays disabled. Local reviewed ZIPs work.
-3. Actual container boot/publicTLS needs Docker daemon/hosting; no public deployment or GitHub push authorized for this new repo. Remote CI configured, not run.
+1. **Physical camera trial explicitly deferred by the user.** Positive fixed-reference and temporal collection quality remain unmeasured. Do not infer them from fixture tests or manufacture evidence. The frozen independent evaluation protocol and harness are ready for later.
+2. Private Roboflow camera export: the existing workspace is public-only. The generated-card integration project is test-only, and automatic camera export stays disabled. Reviewed local ZIP releases work; the private exporter and reconciliation path are implemented and contract-tested.
+3. Public hosting/TLS issuance and remote GitHub CI have not run. No push/public deployment was requested for this new repository. Hosted S3-provider compatibility is untested; the actual local HTTP emulator passed. Deployment/operations runbooks are delivered.
 
 ## Resume and live processes
 
-Repository `/Users/idide/projects/roboflowtakehome`, origin `RyanLin5967/roboflowtakehome`. API at http://127.0.0.1:8080, workspace /#/workspace. API/worker were running at this checkpoint; verify before starting duplicate processes. `uv run counterpart serve` / `uv run counterpart worker` restart them. Credentials remain outside repository in the existing private JSON, nonsecret runtime settings at ~/.config/counterpart/runtime.json.
+Repository `/Users/idide/projects/roboflowtakehome`, origin `RyanLin5967/roboflowtakehome`. Current app: http://127.0.0.1:8080 ; operator workspace: http://127.0.0.1:8080/#/workspace . API exec session 10118 and worker session 15270 were running at the final checkpoint. Verify actual liveness before starting duplicates; process IDs/session handles can expire. `uv run counterpart serve` and `uv run counterpart worker` restart the services. Provider credentials remain outside the repository; nonsecret development overrides are at `~/.config/counterpart/runtime.json`.
 
-All agents' file ownership has returned to root after integration. Full current architecture/protocol, operations/deployment, dataset format and seven-minute demonstration plus Q&A are documented. Sanitized machine-readable evidence is under research/. Raw browser media/reports in ignored artifacts/.
+The full implementation checkpoint is `129d527`. The following checkpoint adds actual container evidence and current completion records, without application behavior changes. All agent ownership has returned to root. Current architecture/protocol, operations/deployment, dataset format and a seven-minute demonstration plus Q&A are documented. Sanitized evidence is under `research/`; raw browser artifacts are ignored under `artifacts/`.
 
-Native goal creation was refused because an unrelated CoverageCV goal remains paused. BUILD_LOOP.json tracks this Counterpart loop; it cannot guarantee execution after the session closes. Never falsely finish/resume the old goal.
+Native goal creation was refused because an unrelated CoverageCV goal remains paused. The separate Counterpart loop is now complete within the user's updated scope. Do not alter the old goal or promise execution/process survival after the session closes.
 
 ---
+
+## Historical initial kernel record (superseded by the full-product checkpoint above)
 
 
 # Counterpart execution status

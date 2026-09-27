@@ -1,7 +1,7 @@
 {
   "schema_version": "counterpart.software-validation.v1",
-  "recorded_at": "2026-09-27T00:25:53.306613+00:00",
-  "scope": "Full product implementation in this checkout; external physical and deployment gates remain open",
+  "recorded_at": "2026-09-27T00:41:21.626964+00:00",
+  "scope": "Full product implementation and isolated local container deployment; physical camera trial deferred by user, external hosting/provider gates separate",
   "python": {
     "passed": 752,
     "skipped": 0,
@@ -94,10 +94,23 @@
     "local_model_calls": 0
   },
   "unexecuted": [
-    "actual physical collector study",
-    "actual camera temporal quality",
-    "real private camera dataset export",
-    "container build/start and public TLS",
+    "actual physical collector study (user deferred)",
+    "actual camera temporal quality (user deferred)",
+    "real private camera dataset export (private-project entitlement unavailable)",
+    "hosted S3 provider compatibility",
+    "public hosting and TLS issuance",
     "remote GitHub CI"
-  ]
+  ],
+  "container_deployment": {
+    "passed": true,
+    "report": "research/deployment_probe.json",
+    "mode": "fixture_replay",
+    "actual_image_built": true,
+    "authenticated_product_flow": true,
+    "worker_failure_recovery": true,
+    "full_service_restart_persistence": true,
+    "compiled_mobile_browser": true,
+    "cloud_calls": 0,
+    "disposable_environment_removed": true
+  }
 }

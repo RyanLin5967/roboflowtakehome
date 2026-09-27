@@ -1,0 +1,66 @@
+{
+  "executed_at": "2026-09-27T00:33:23.041115+00:00",
+  "source_revision": "129d5275792922765345a6887c37ab886139053a",
+  "environment": "isolated local Colima Linux/arm64 Docker Compose",
+  "vm_limits": {
+    "cpus": 2,
+    "memory_gib": 2,
+    "data_disk_gib": 8,
+    "root_disk_gib": 6
+  },
+  "mode": "fixture_replay",
+  "cloud_calls": 0,
+  "model_accuracy_claim": false,
+  "checks": {
+    "locked_image_build": true,
+    "postgres_api_worker_start": true,
+    "anonymous_operator_refused": true,
+    "local_bootstrap_refused": true,
+    "operator_login": true,
+    "invitation_collection": true,
+    "collector_cannot_be_operator": true,
+    "worker_sigkill_preserves_baseline": true,
+    "stopped_worker_queue_recovered": true,
+    "idempotent_publication": true,
+    "reviewed_immutable_release": true,
+    "archive_hash_readback": true,
+    "all_service_restart_persistence": true,
+    "nonroot_api_uid": 10001,
+    "provider_credentials_absent": true
+  },
+  "archive": {
+    "assets": 2,
+    "examples": 2,
+    "bytes": 71123
+  },
+  "initial_workers": 1,
+  "limits": [
+    "No physical camera validation",
+    "No hosted S3 check",
+    "No public TLS issuance"
+  ],
+  "image_id": "sha256:90c5dfab0942b90ed746ae9fdbdb60ea7f984af3efbad4d61e794e07b1fd18c6",
+  "browser": {
+    "browser": "Chromium",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "real_compiled_assets": true,
+    "anonymous_login_gate": true,
+    "operator_signin": true,
+    "existing_collection_opened": true,
+    "saved_images_rendered": true,
+    "release_download_bytes": 71123,
+    "viewport_overflow": false,
+    "page_errors": 0,
+    "correct_script_and_style_mime": true,
+    "token_absent_from_browser_storage": true
+  },
+  "cleanup": {
+    "containers_and_volumes_removed": true,
+    "dedicated_vm_deleted": true,
+    "temporary_credentials_and_tools_removed": true,
+    "existing_dbprobe_profile_untouched": true
+  }
+}

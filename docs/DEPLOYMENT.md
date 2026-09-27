@@ -12,12 +12,36 @@ On 2026-09-26, the S3 adapter was exercised against an actual localhost Moto HTT
 server, including concurrent writes and response loss. Base and TLS Compose files
 were parsed with official Docker Compose v5.5.1 and inspected for private port
 binding and required operator authentication. Image tags and multiarchitecture
-manifest digests were checked against Docker Hub. **Container image build, stack
-boot, Caddy certificate issuance, and real S3 deployment have not been executed:**
-this machine's Docker daemon was unavailable. The temporary Compose executable
-was digest verified and removed after validation. No VM was started and no cloud
-storage was provisioned. These distinctions are deployment gates, not claims of
-production validation.
+manifest digests were checked against Docker Hub.
+
+The actual locked image was subsequently built and exercised in a **new isolated
+Colima Linux/arm64 VM**, with 2 CPUs, 2 GiB RAM, an 8 GiB data disk and 6 GiB root
+disk. The stopped `dbprobe` profile and native app on port 8080 were left alone.
+Host mounts, SSH-agent forwarding and automatic context activation were disabled.
+The private test stack used port 18080, generated disposable credentials, and no
+provider keys; inference and external export were disabled.
+
+Executed container checks: PostgreSQL/API/worker initialization and readiness,
+operator login and anonymous denial, collector invitation, complete fixture pair,
+worker SIGKILL with baseline preservation, work queued while the worker was
+stopped and completed after restart, idempotent publication, explicit review,
+immutable release, original-byte hash readback, and a complete service restart
+preserving the session, review, release and media. API UID was 10001. Actual
+Chromium at 390px opened the compiled frontend, required login, rendered both
+saved images and downloaded the 71,123-byte dataset ZIP without page errors or
+horizontal overflow. Script/style MIME types and absence of the operator token
+from browser storage were verified. These are fixture/runtime checks, not model
+accuracy or human camera evidence.
+
+The dedicated containers, volumes, VM and temporary secret/tool files were removed
+after the check. [Machine-readable evidence](../research/deployment_probe.json)
+records the exact image and source revision. The HTTP acceptance script is
+[deployment_probe.py](../scripts/deployment_probe.py); compiled browser checks are
+in [browser_probe.mjs](../deploy/browser_probe.mjs).
+
+**Still not executed:** public TLS certificate issuance, a public deployment or
+hosted S3-provider compatibility. No cloud storage was provisioned and no model
+calls or charges were incurred during the deployment gate.
 
 ## Private container setup
 
@@ -46,6 +70,8 @@ prove work consumption. The shared media directory is initialized for UID/GID
 Open `http://127.0.0.1:8080`. Read the operator token privately from
 `~/.config/counterpart/deploy/runtime.env` to sign in. Do not paste configuration
 into logs, issue reports, or `docker compose config` output; use `config --quiet`.
+The loopback-only stack explicitly enables `operator_local_http`; the exception
+requires loopback origins and restricted hostnames. The TLS overlay disables it.
 Operator access and collector invitations are distinct from each session's
 capability. Session links are secrets and must not be posted publicly.
 
@@ -152,7 +178,17 @@ Keep API and worker from the same image revision. Scale workers with
 `--scale worker=2`; transaction/lease admission still bounds concurrent committed
 verification. Adding workers does not increase a provider allowance. Monitor
 pending age, expired leases, recovery failures, budget rejections and export
-reconciliation; container restarts alone are not proof of useful work.
+reconciliation; container restarts alone are not proof of useful work. The
+operator runtime endpoint reports database-clock worker heartbeats (5-second
+refresh, stale after 15 seconds); this is liveness, not provider readiness.
+
+The typed backup/restore procedure and its executed local PostgreSQL restoration
+drill are in [OPERATIONS.md](OPERATIONS.md). The application image intentionally
+does not bundle the PostgreSQL administration client. Run the typed backup helper
+from an administrative environment with compatible `pg_dump`, or use the
+container-native procedure below, which runs `pg_dump` from the PostgreSQL image.
+The scratch volume supports bounded archive spooling without assuming that a
+512 MiB archive fits a small memory-backed `/tmp`.
 
 For a consistent filesystem backup, stop API and workers, dump PostgreSQL and
 copy the media volume while capture/retention writes are stopped. For example,
@@ -176,9 +212,12 @@ Restore into an **isolated empty database and empty storage target**, never the
 running service. Use `pg_restore --exit-on-error --no-owner`, restore media with
 the correct ownership, then start one worker and verify old pair downloads,
 SHA-256 readback, preserved budget reservations, invitation/session access, and a
-new replay capture. Only switch traffic after that rehearsal passes. No restore
-rehearsal of the container topology is claimed yet. The local integration suite
-tests the database/worker recovery semantics separately.
+new replay capture. Only switch traffic after that rehearsal passes. The local
+PostgreSQL test has restored a complete reviewed pair, release, capability and
+nonzero reservation ledger using real `pg_dump`/`pg_restore` in isolated schemas.
+The container gate verified full service restart and named-volume persistence;
+it did not restore a container stack from an off-host backup or reconcile live
+provider-side effects.
 
 Before an update: back up, record the image revision, stop admission during schema
 changes, run initializer, then roll API and workers together. An application image

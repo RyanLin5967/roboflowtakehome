@@ -40,7 +40,7 @@ Open **http://127.0.0.1:8080** for capture, or **http://127.0.0.1:8080/#/workspa
 
 For real collection, provide a server-only `ROBOFLOW_API_KEY` and enable `COUNTERPART_LIVE_ENABLED=true` for API and worker. Credentials may live in the existing private credential file; keep them outside this repository. Hosted `coco/39` performs perception. Every actual image dispatch reserves a durable allowance before its request; retries never erase uncertain cost. Successful frame observations survive process crashes and are reused only for identical bytes and detector configuration. The portable default allowance is 128 image attempts; changing or restoring the database is **not** a way to reset provider spending.
 
-A phone camera requires HTTPS. The [deployment guide](docs/DEPLOYMENT.md) includes authenticated API/worker/Postgres containers, shared filesystem or S3 media, and optional Caddy TLS. Docker configurations were validated; container boot and public hosting remain separate, unexecuted gates in the current environment.
+A phone camera requires HTTPS. The [deployment guide](docs/DEPLOYMENT.md) includes authenticated API/worker/Postgres containers, shared filesystem or S3 media, and optional Caddy TLS. The actual container build, collection/review/release flow, worker recovery, service restart and mobile browser checks passed in an isolated local VM. Public hosting and TLS issuance have not been executed.
 
 ## The complete data path
 
