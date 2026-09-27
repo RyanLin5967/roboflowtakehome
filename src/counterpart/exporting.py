@@ -4,7 +4,8 @@ An iteration performs at most one publication operation and one read-only privac
 check, so capture verification can preempt between every image/annotation. A persisted write
 intent survives the dangerous crash window after an external effect but before
 its receipt. Such an upload is reconciled, never blindly repeated. Annotation
-ambiguity needs operator reconciliation: the adapter has no trustworthy readback.
+ambiguity needs operator reconciliation: ground-truth readback does not prove
+that the intended prediction was stored.
 """
 
 from __future__ import annotations
@@ -19,8 +20,8 @@ from .config import Settings
 from .destination import DestinationError, DestinationResolver
 from .object_storage import MediaUnavailable
 from .providers import ProviderError, RoboflowExporter, voc_prediction
-from .repository import Repository
-from .splits import split_for_session
+from .repository import Conflict, Repository
+from .splits import split_for_group, validate_split_group
 from .storage import MediaStore
 
 log = logging.getLogger(__name__)
@@ -34,34 +35,54 @@ class InvalidExport(ValueError):
 
 
 def export_split(split_group: str) -> str:
-    """Stable 80/10/10 assignment keeps all observations of a session together."""
-    return split_for_session(split_group)
+    """Stable 80/10/10 assignment keeps a frozen scene group together."""
+    return split_for_group(split_group)
 
 
-def _assets(manifest: dict, pair_id: str) -> dict[str, dict]:
+def _assets(manifest: dict, pair_id: str, *, media_reader=None) -> dict[str, dict]:
     """Fail before any external write if the publication is not canonical live evidence."""
     if (
         not isinstance(manifest, dict)
-        or manifest.get("schema_version") != "counterpart.pair.v1"
+        or manifest.get("schema_version") not in {"counterpart.pair.v1", "counterpart.pair.v2"}
         or manifest.get("pair_id") != pair_id
         or manifest.get("mode") != "live"
         or not isinstance(manifest.get("provenance"), dict)
         or manifest["provenance"].get("evidence_kind") != "roboflow_capture"
         or not isinstance(manifest.get("session_id"), str)
         or not _IMAGE_ID.fullmatch(manifest["session_id"])
-        or manifest.get("split_group") != manifest["session_id"]
-        or ("split" in manifest and manifest["split"] != split_for_session(manifest["session_id"]))
     ):
         raise InvalidExport("invalid_export_manifest")
+    human_adjudicated = manifest["schema_version"] == "counterpart.pair.v2"
+    if human_adjudicated:
+        from .evidence_revisions import validate_adjudication
+
+        try:
+            validate_adjudication(
+                manifest, media_reader=media_reader, replay_decisions=media_reader is not None
+            )
+        except (Conflict, KeyError, TypeError, ValueError):
+            raise InvalidExport("invalid_export_adjudication") from None
+    try:
+        group = (
+            validate_split_group(manifest["split_provenance"], manifest["session_id"])["id"]
+            if "split_provenance" in manifest
+            else manifest["session_id"]
+        )
+        if manifest.get("split_group") != group or (
+            "split" in manifest and manifest["split"] != split_for_group(group)
+        ):
+            raise ValueError("Invalid frozen split")
+    except (KeyError, ValueError):
+        raise InvalidExport("invalid_export_manifest") from None
     assets = {}
     for slot in ("baseline", "counterpart"):
         capture = manifest.get(slot)
         if (
             not isinstance(capture, dict)
-            or capture.get("slot") != slot
-            or capture.get("status") != "accepted"
+            or (not human_adjudicated and capture.get("slot") != slot)
+            or (not human_adjudicated and capture.get("status") != "accepted")
             or not isinstance(capture.get("result"), dict)
-            or capture["result"].get("accepted") is not True
+            or (not human_adjudicated and capture["result"].get("accepted") is not True)
             or not isinstance(capture.get("frames"), list)
             or not 1 <= len(capture["frames"]) <= 48
         ):
@@ -153,7 +174,14 @@ class ExportWorker:
         }
         if job.get("destination") != expected:
             raise InvalidExport("export_destination_mismatch")
-        assets = _assets(manifest, pair_id)
+        # A human pair decision does not promote detector boxes to ground truth.
+        # Original uncertain observations remain prediction=true/addToDataset=false
+        # in _annotate; independent Roboflow annotation review happens later.
+        try:
+            assets = _assets(manifest, pair_id, media_reader=self.media.read)
+        except MediaUnavailable:
+            self.repo.export_finish(pair_id, lease, "pending", error="media_unavailable", delay_seconds=10)
+            return
         destination = {
             "provider": "roboflow",
             **expected,

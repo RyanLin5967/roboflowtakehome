@@ -22,6 +22,8 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from .execution_contract import ExecutionContractError, assert_execution_matches, assert_result_matches
+from .execution_contract import detector_configuration as model_configuration
 from .providers import ProviderError
 
 WORKER_STALE_SECONDS = 15
@@ -133,23 +135,26 @@ class InferenceRuntime:
         # Credentials deliberately cannot enter this allowlisted configuration.
         # Custom adapters have separate namespaces; version their configuration
         # explicitly when semantics change. Roboflow's route includes its model version.
-        self.model_config = detector_configuration or {
-            "provider": "roboflow",
-            "model_id": getattr(detector, "model_id", config.roboflow_model),
-            "adapter": (
-                f"{type(detector).__module__}.{type(detector).__qualname__}"
-                if detector is not None
-                else "counterpart.providers.RoboflowDetector"
-            ),
-            "adapter_version": "serverless-v0-v1",
-            "normalizer_version": "rf-xyxy-v1",
-            "confidence_threshold": 0.25,
-            "disable_active_learning": True,
-        }
-        self.model_config = json.loads(_canonical(self.model_config))
-        self.config_digest = hashlib.sha256(_canonical(self.model_config).encode()).hexdigest()
+        self._default_identity = detector_configuration is None
+        identity = (
+            model_configuration(config, detector)
+            if detector_configuration is None
+            else detector_configuration
+        )
+        self._model_config = json.loads(_canonical(identity))
+        self.config_digest = hashlib.sha256(_canonical(self._model_config).encode()).hexdigest()
         self._initialized = False
         self._initialize_lock = threading.Lock()
+
+    @property
+    def model_config(self) -> dict:
+        # Neither callers nor returned observation dictionaries can mutate the
+        # runtime namespace after its digest/cache identity has been established.
+        return json.loads(_canonical(self._model_config))
+
+    def _assert_detector_identity(self) -> None:
+        if self._default_identity and model_configuration(self.config, self.detector) != self._model_config:
+            raise ProviderError("detector_configuration_changed")
 
     @contextmanager
     def _connection(self):
@@ -358,7 +363,22 @@ class InferenceRuntime:
             stop.set()
             thread.join(timeout=self.heartbeat_seconds + 1)
 
-    def _frame(self, frame: dict, session_id: str, job_key: str, cancelled: threading.Event) -> dict:
+    @staticmethod
+    def _validate_result(result: dict, contract: dict) -> None:
+        try:
+            assert_result_matches(result, contract["configuration"])
+        except ExecutionContractError as error:
+            raise ProviderError(error.code) from error
+
+    def _frame(
+        self,
+        frame: dict,
+        session_id: str,
+        job_key: str,
+        cancelled: threading.Event,
+        execution_contract: dict | None = None,
+    ) -> dict:
+        self._assert_detector_identity()
         request_id, started = str(uuid4()), time.perf_counter()
         key = self.cache_key(frame)
         # Validate stored bytes even on a cache hit; corrupt evidence must not be
@@ -370,6 +390,8 @@ class InferenceRuntime:
                 if outcome == "budget":
                     raise ProviderError("budget_exhausted")
                 if outcome == "cached":
+                    if execution_contract is not None:
+                        self._validate_result(cached["result"], execution_contract)
                     return self._observation(frame, cached, reused=True, started=started)
                 if outcome == "dispatch":
                     with self._frame_heartbeat(key, request_id) as lease_lost:
@@ -383,6 +405,8 @@ class InferenceRuntime:
                                 raise ProviderError("invalid_provider_response")
                             if not isinstance(result.get("model"), dict):
                                 raise ProviderError("invalid_provider_response")
+                            if execution_contract is not None:
+                                self._validate_result(result, execution_contract)
                             _canonical(result)  # Reject non-finite or non-JSON provider output.
                             if lease_lost.is_set():
                                 raise ProviderError("inference_lease_lost", retryable=True)
@@ -413,6 +437,7 @@ class InferenceRuntime:
                 "source": "cache" if reused else "provider",
                 "cache_key": cached["cache_key"],
                 "configuration_digest": self.config_digest,
+                "configuration": self.model_config,
                 "observation_id": str(cached["lease_token"]),
                 "observed_at": cached["completed_at"].isoformat(),
                 "provider_latency_ms": provider_latency,
@@ -427,7 +452,12 @@ class InferenceRuntime:
         session_id: str,
         job_key: str,
         heartbeat: Callable[[], bool] | None = None,
+        execution_contract: dict | None = None,
     ) -> list[dict]:
+        # Contract validation precedes initialization, cache lookup and any reservation.
+        self._assert_detector_identity()
+        if execution_contract is not None:
+            assert_execution_matches(execution_contract, self.model_config)
         self.initialize()
         heartbeat = heartbeat or (lambda: True)
         if not heartbeat():
@@ -456,7 +486,14 @@ class InferenceRuntime:
                         and len(pending) < self.concurrency
                         and next_index < len(frames)
                     ):
-                        future = pool.submit(self._frame, frames[next_index], session_id, job_key, cancelled)
+                        future = pool.submit(
+                            self._frame,
+                            frames[next_index],
+                            session_id,
+                            job_key,
+                            cancelled,
+                            execution_contract,
+                        )
                         pending[future] = next_index
                         next_index += 1
                     if not pending:

@@ -8,10 +8,17 @@ version = "0.1.0"
 description = "Reliable collection of controlled visual pairs with Roboflow"
 requires-python = ">=3.12,<3.14"
 dependencies = [
-  "fastapi==0.141.1", "uvicorn==0.54.0", "psycopg[binary,pool]==3.3.6",
-  "pydantic==2.13.5", "pydantic-settings==2.15.0", "httpx==0.28.1",
-  "python-multipart>=0.0.20,<0.1", "pillow>=12,<13",
+  "fastapi==0.141.1",
+  "uvicorn==0.54.0",
+  "psycopg[binary,pool]==3.3.6",
+  "pydantic==2.13.5",
+  "pydantic-settings==2.15.0",
+  "httpx==0.28.1",
+  "python-multipart>=0.0.20,<0.1",
+  "pillow>=12,<13",
   "boto3==1.43.103",
+  "opencv-python-headless==4.13.0.92",
+  "numpy>=2,<3",
 ]
 
 [dependency-groups]

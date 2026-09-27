@@ -117,3 +117,25 @@ ALTER TABLE counterpart_captures ADD COLUMN IF NOT EXISTS reference_capture_id u
     REFERENCES counterpart_captures(id);
 ALTER TABLE counterpart_captures ADD COLUMN IF NOT EXISTS retry_of_capture_id uuid
     REFERENCES counterpart_captures(id);
+
+-- Nullable only for historical records; adoption is an explicit audited operation.
+ALTER TABLE counterpart_sessions ADD COLUMN IF NOT EXISTS execution_contract jsonb;
+CREATE OR REPLACE FUNCTION counterpart_frozen_execution_guard() RETURNS trigger AS $$
+BEGIN
+    IF OLD.execution_contract IS NOT NULL
+       AND NEW.execution_contract IS DISTINCT FROM OLD.execution_contract THEN
+        RAISE EXCEPTION 'execution contract is immutable';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS counterpart_frozen_execution ON counterpart_sessions;
+CREATE TRIGGER counterpart_frozen_execution BEFORE UPDATE OF execution_contract
+    ON counterpart_sessions FOR EACH ROW EXECUTE FUNCTION counterpart_frozen_execution_guard();
+
+-- Operator authorization permits collection from an uncertain baseline without
+-- overwriting its machine decision. The immutable source record lives in the
+-- evidence schema; its session copy is cleared on a replacement baseline.
+ALTER TABLE counterpart_sessions ADD COLUMN IF NOT EXISTS baseline_authorization jsonb;
+ALTER TABLE counterpart_captures ADD COLUMN IF NOT EXISTS baseline_authorization jsonb;
+ALTER TABLE counterpart_captures ADD COLUMN IF NOT EXISTS recovery_unresolved boolean NOT NULL DEFAULT false;

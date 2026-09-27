@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     credentials_file: Path = Path.home() / ".config/coveragecv/credentials.json"
     export_project: str = ""
     export_enabled: bool = False
+    # Dataset generation has a separate durable allowance. The recorded evidence
+    # is an operator reference to verified provider controls, never a credential.
+    roboflow_generation_limit: int = Field(default=0, ge=0, le=100)
+    roboflow_generation_budget_evidence: str = Field(default="", max_length=500)
     max_upload_bytes: int = 24 * 1024 * 1024
     max_asset_bytes: int = 2 * 1024 * 1024
     max_archive_bytes: int = Field(default=512 * 1024 * 1024, ge=1024 * 1024, le=8 * 1024**3)

@@ -33,18 +33,27 @@ from psycopg.conninfo import make_conninfo
 
 from counterpart.collections import CollectionRepository
 from counterpart.config import Settings
+from counterpart.execution_contract import build_execution_contract
 from counterpart.fixtures import generate
 from counterpart.inference_runtime import InferenceRuntime
+from counterpart.recipes import build_recipe_snapshot
 from counterpart.repository import Conflict, Repository
 from counterpart.storage import MediaStore
 from counterpart.worker import Worker
 
-FIXTURE_CONFIG = {
-    "provider": "local_fake_http",
-    "model_id": "generated-observations-v1",
-    "adapter_version": "product-fault-probe-v1",
-    "evidence": "no_model_executed",
-}
+
+def fixture_configuration(endpoint: str) -> dict:
+    """Explicit semantics for this local HTTP fixture, never a hosted-model claim."""
+    return {
+        "provider": "local_fake_http",
+        "model_id": "generated-observations-v1",
+        "endpoint": endpoint,
+        "adapter": "product_fault_probe.FixtureHTTPDetector",
+        "adapter_version": "product-fault-probe-v2",
+        "normalizer_version": "fixture-normalized-xyxy-v1",
+        "confidence_threshold": 0.0,
+        "disable_active_learning": True,
+    }
 
 
 class FixtureHTTPDetector:
@@ -97,9 +106,11 @@ def make_worker(repo, media, config, endpoint=None, worker_id=None):
     detector = FixtureHTTPDetector(endpoint) if endpoint else None
     worker = Worker(repo, media, config, detector=detector, worker_id=worker_id)
     if detector:
-        worker.inference = InferenceRuntime(
-            repo, media, config, detector, detector_configuration=FIXTURE_CONFIG
+        # Worker preflight and frame dispatch must share the exact contract.
+        worker.runtime = InferenceRuntime(
+            repo, media, config, detector, detector_configuration=fixture_configuration(endpoint)
         )
+        worker.inference = worker.runtime
     return worker
 
 
@@ -454,7 +465,20 @@ def exercise_checkpoint_cache(repo, media, directory):
     endpoint = f"http://127.0.0.1:{server.server_port}/fixture-detections"
     config = configure(repo.dsn, media.root, True)
     try:
-        saved = repo.create_session("temporal", "live", "bottle", "cup")["session"]
+        # This is a frozen v1 orchestration fixture, not a v2 scene-registration
+        # or hosted Roboflow quality test. Pin the actual local adapter before
+        # dispatch; never change production contracts to accommodate fixtures.
+        contract = build_execution_contract(detector_configuration=fixture_configuration(endpoint))
+        with repo._connection() as connection:
+            saved = repo._create_session(
+                connection,
+                "temporal",
+                "live",
+                "bottle",
+                "cup",
+                recipe_snapshot=build_recipe_snapshot("temporal", recipe_version="1.0.0"),
+                execution_contract=contract,
+            )["session"]
         submitted = submit(repo, saved, frames(media, "temporal", "baseline", live=True), "baseline")
         doomed = child_process(
             directory,
@@ -462,7 +486,13 @@ def exercise_checkpoint_cache(repo, media, directory):
         )
         try:
             doomed.communicate(timeout=30)
-            assert doomed.returncode == 73, "Checkpoint worker failed before the injected acceptance crash"
+            if doomed.returncode != 73:
+                capture = repo.snapshot(saved["id"])["latest_capture"]
+                raise AssertionError(
+                    "Checkpoint worker failed before the injected acceptance crash: "
+                    f"exit={doomed.returncode}, capture_status={capture['status']}, "
+                    f"error_code={capture['error']}"
+                )
         finally:
             if doomed.poll() is None:
                 doomed.kill()
@@ -495,6 +525,8 @@ def exercise_checkpoint_cache(repo, media, directory):
         assert not repo.finish(str(old["id"]), str(old["lease_token"]), {"accepted": True}, [])
         return {
             "provider_kind": "localhost fake HTTP responses from generated fixture declarations",
+            "recipe_version": saved["recipe_snapshot"]["recipe_version"],
+            "frozen_fixture_contract_verified": saved["execution_contract"] == contract,
             "cloud_calls": 0,
             "local_model_calls": 0,
             "sampled_frames": len(generated),

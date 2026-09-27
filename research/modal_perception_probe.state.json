@@ -1,0 +1,29 @@
+{
+  "app_id": "ap-v8bYPnJ9if3JidAfm2c3Wy",
+  "attempts": [
+    {
+      "app_id": "ap-k3h3c5XRtXUyqIBQhwrJZP",
+      "call_id": "fc-01M3G9335KAABG2Q9JF2TQ3F6P",
+      "created_at": "2026-09-27T01:52:24.855738+00:00",
+      "error_type": "BadZipFile",
+      "image_id": "im-giyIPpZDqRMasLXeCABzNS",
+      "plan_sha256": "c0f97da06e1105763382165d24140c238f3dfa03ad1910e18663d4537d9446d6",
+      "reserved_usd": 0.8,
+      "run_id": "counterpart-whatsup-coco58-v1",
+      "status": "inspect_before_any_retry",
+      "submitted_at": "2026-09-27T01:53:50.255112+00:00"
+    }
+  ],
+  "both_attempts_resource_envelope_usd": 0.6241551111111112,
+  "call_id": "fc-01M3G95S704Y9T6VF718XWV4FB",
+  "completed_at": "2026-09-27T01:56:11.635220+00:00",
+  "created_at": "2026-09-27T01:55:17.357492+00:00",
+  "image_id": "im-giyIPpZDqRMasLXeCABzNS",
+  "plan_sha256": "c0f97da06e1105763382165d24140c238f3dfa03ad1910e18663d4537d9446d6",
+  "repair": "Official source has gzip TAR magic; fix reader before any model predictions.",
+  "reserved_usd": 0.8,
+  "run_id": "counterpart-whatsup-coco58-v1",
+  "second_attempt_timeout_seconds": 900,
+  "status": "complete",
+  "submitted_at": "2026-09-27T01:55:18.350244+00:00"
+}

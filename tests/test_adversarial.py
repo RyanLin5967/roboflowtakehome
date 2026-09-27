@@ -387,9 +387,22 @@ def test_live_api_worker_provider_and_publication_preserve_exact_evidence(advers
         detector = RoboflowDetector("counterpart-test-no-real-key", client=transport)
         worker = Worker(repo, MediaStore(config.media_dir), config, detector=detector)
         with TestClient(create_app(config, repo)) as client:
-            created = client.post("/api/sessions", json={"recipe": "spatial", "mode": "live"})
-            assert created.status_code == 201
-            session, token = created.json()["session"], created.json()["token"]
+            # This transport-only fixture is a historical v1 recipe. Solid
+            # colors deliberately do not purport to satisfy v2 registration.
+            from counterpart.execution_contract import build_execution_contract
+            from counterpart.recipes import build_recipe_snapshot
+
+            with repo._connection() as connection:
+                created = repo._create_session(
+                    connection,
+                    "spatial",
+                    "live",
+                    "bottle",
+                    "cup",
+                    recipe_snapshot=build_recipe_snapshot("spatial"),
+                    execution_contract=build_execution_contract(config),
+                )
+            session, token = created["session"], created["token"]
             headers = {"Authorization": f"Bearer {token}"}
             path = f"/api/sessions/{session['id']}"
             for slot, raw in zip(("baseline", "counterpart"), originals, strict=True):
@@ -453,7 +466,17 @@ def test_abrupt_worker_exit_reclaims_saved_evidence_and_charges_possible_retry(a
     raw = io.BytesIO()
     Image.new("RGB", (800, 600), "navy").save(raw, "JPEG")
     saved = {**media.put(raw.getvalue()), "t_ms": 0}
-    session = repo.create_session("spatial", "live", "bottle", "cup")["session"]
+    from counterpart.recipes import build_recipe_snapshot
+
+    with repo._connection() as connection:
+        session = repo._create_session(
+            connection,
+            "spatial",
+            "live",
+            "bottle",
+            "cup",
+            recipe_snapshot=build_recipe_snapshot("spatial"),
+        )["session"]
     submitted = _submit(repo, session, "baseline", frames=[saved])
     marker = tmp_path / "mock-provider-completed"
     # No real adapter or credentials: this is a crash/transaction experiment only.
@@ -465,15 +488,19 @@ from counterpart.repository import Repository
 from counterpart.storage import MediaStore
 from counterpart.worker import Worker
 
-class CompletedThenLost:
-    def detect(self, image, width, height):
-        Path(sys.argv[3]).write_text('mock provider completed; receipt lost')
-        os._exit(41)
+import httpx
+from counterpart.providers import RoboflowDetector
+
+def completed_then_lost(request):
+    Path(sys.argv[3]).write_text('mock provider completed; receipt lost')
+    os._exit(41)
 
 config = Settings(database_url=sys.argv[1], media_dir=Path(sys.argv[2]),
                   live_enabled=True, inference_limit=2)
-Worker(Repository(config.database_url), MediaStore(config.media_dir), config,
-       detector=CompletedThenLost(), worker_id='abrupt-subprocess').once()
+with httpx.Client(transport=httpx.MockTransport(completed_then_lost)) as transport:
+    detector = RoboflowDetector('test-no-provider-key', client=transport)
+    Worker(Repository(config.database_url), MediaStore(config.media_dir), config,
+           detector=detector, worker_id='abrupt-subprocess').once()
 """
     child = subprocess.run(
         [sys.executable, "-c", program, repo.dsn, str(media.root), str(marker)],
@@ -496,17 +523,38 @@ Worker(Repository(config.database_url), MediaStore(config.media_dir), config,
             "UPDATE counterpart_jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=%s",
             (original[0],),
         )
+        # The same adapter namespace now safely waits for its own frame lease.
+        # Advance both expired owners, rather than switching model namespaces.
+        conn.execute(
+            "UPDATE counterpart_inference_cache SET lease_expires_at=clock_timestamp()-interval '1 second' "
+            "WHERE status='running'"
+        )
+        conn.execute(
+            "UPDATE counterpart_inference_attempts SET "
+            "lease_expires_at=clock_timestamp()-interval '1 second' WHERE status='running'"
+        )
 
-    class ReplacementDetector:
-        def detect(self, image, width, height):
-            assert image == raw.getvalue()
-            return {
-                "detections": _observation(0.2, 0.5)["detections"],
-                "model": {"provider": "test_observations", "model_id": "no-model-executed"},
-            }
+    from counterpart.providers import RoboflowDetector
+
+    def replacement_response(request):
+        assert base64.b64decode(request.content) == raw.getvalue()
+        return httpx.Response(
+            200,
+            json={
+                "image": {"width": 800, "height": 600},
+                "model_id": "coco/39",
+                "predictions": [
+                    {"class": "bottle", "confidence": 0.99, "x": 160, "y": 300, "width": 72, "height": 108},
+                    {"class": "cup", "confidence": 0.99, "x": 400, "y": 300, "width": 72, "height": 108},
+                ],
+            },
+        )
 
     config = Settings(database_url=repo.dsn, media_dir=media.root, live_enabled=True, inference_limit=2)
-    replacement = Worker(repo, media, config, detector=ReplacementDetector(), worker_id="replacement-process")
+    detector = RoboflowDetector(
+        "test-no-provider-key", client=httpx.Client(transport=httpx.MockTransport(replacement_response))
+    )
+    replacement = Worker(repo, media, config, detector=detector, worker_id="replacement-process")
     assert replacement.once()
     final = repo.snapshot(session["id"])
     assert final["baseline"]["id"] == submitted["capture"]["id"]
@@ -514,6 +562,7 @@ Worker(Repository(config.database_url), MediaStore(config.media_dir), config,
     assert repo.metrics()["budget_reservations"] == [{"provider": "roboflow", "reserved_units": 2}]
     assert repo.heartbeat(str(original[0]), str(original[1])) is False
     assert not replacement.once()
+    detector.close()
 
 
 @pytest.mark.postgres
@@ -558,12 +607,16 @@ def test_worker_retries_transient_shared_storage_outage_without_spending(adversa
         def read(self, *_):
             raise MediaUnavailable("Evidence storage could not read this asset.")
 
-    class MustNotDispatch:
-        def detect(self, *_):
-            pytest.fail("No provider dispatch before immutable media is available")
+    from counterpart.providers import RoboflowDetector
+
+    def must_not_dispatch(request):
+        pytest.fail("No provider dispatch before immutable media is available")
 
     config = Settings(database_url=repo.dsn, media_dir=tmp_path / "media", live_enabled=True)
-    assert Worker(repo, UnavailableStorage(), config, MustNotDispatch()).once()
+    with RoboflowDetector(
+        "test-no-provider-key", client=httpx.Client(transport=httpx.MockTransport(must_not_dispatch))
+    ) as detector:
+        assert Worker(repo, UnavailableStorage(), config, detector).once()
     saved = repo.snapshot(session["id"])
     assert saved["latest_capture"]["status"] == "queued"
     assert saved["latest_capture"]["error"] == "media_unavailable"

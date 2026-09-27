@@ -18,6 +18,8 @@ class CreateSession(RecipeParameters):
 
     @model_validator(mode="after")
     def fixture_roles(self):
+        if self.mode == "replay" and self.protected_objects:
+            raise ValueError("Recorded fixtures do not contain protected objects; use live capture.")
         if self.mode == "replay" and (self.object_a, self.object_b) != ("bottle", "cup"):
             raise ValueError(
                 "Recorded fixtures use bottle and cup. Custom object roles require live capture."

@@ -16,8 +16,14 @@ from uuid import UUID, uuid4
 
 from psycopg.types.json import Jsonb
 
+from .execution_contract import (
+    ExecutionContractError,
+    build_execution_contract,
+    validate_execution_contract,
+)
 from .recipes import RecipeContractError, build_recipe_snapshot
 from .repository import Conflict, NotFound, Repository, _json
+from .splits import split_for_group, validate_split_group
 
 
 def _uuid(value: str, label: str) -> str:
@@ -92,6 +98,9 @@ class CollectionRepository:
         object_a: str = "bottle",
         object_b: str = "cup",
         target_pairs: int = 20,
+        *,
+        execution_contract: dict | None = None,
+        protected_objects: list[str] | None = None,
     ) -> dict:
         name = _text(name, "Collection name", 120)
         if mode not in {"live", "replay"}:
@@ -105,15 +114,41 @@ class CollectionRepository:
         ):
             raise Conflict("invalid_target", "Target pairs must be between one and 100000")
         try:
-            frozen = build_recipe_snapshot(recipe, object_a, object_b)
+            from .recipes import version_for_mode
+
+            frozen = build_recipe_snapshot(
+                recipe,
+                object_a,
+                object_b,
+                recipe_version=version_for_mode(mode),
+                protected_objects=protected_objects or [],
+            )
         except RecipeContractError as error:
             raise Conflict("invalid_recipe", str(error)) from error
+        try:
+            frozen_execution = (
+                build_execution_contract(mode=mode)
+                if execution_contract is None
+                else validate_execution_contract(execution_contract, mode=mode)
+            )
+        except ExecutionContractError as error:
+            raise Conflict(error.code, str(error)) from error
         with self.repository._connection() as connection:
             row = connection.execute(
                 "INSERT INTO counterpart_campaigns "
-                "(id,name,recipe,mode,object_a,object_b,recipe_snapshot,target_pairs) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *",
-                (str(uuid4()), name, recipe, mode, object_a, object_b, Jsonb(frozen), target_pairs),
+                "(id,name,recipe,mode,object_a,object_b,recipe_snapshot,target_pairs,execution_contract) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *",
+                (
+                    str(uuid4()),
+                    name,
+                    recipe,
+                    mode,
+                    object_a,
+                    object_b,
+                    Jsonb(frozen),
+                    target_pairs,
+                    Jsonb(frozen_execution),
+                ),
             ).fetchone()
             return self._view(connection, row)
 
@@ -153,6 +188,44 @@ class CollectionRepository:
                     "collection_paused", "This collection is paused; saved evidence remains available"
                 )
 
+    def create_split_group(self, name: str, description: str = "") -> dict:
+        """Create a workspace-wide scene identity; display names are not identities."""
+        name = _text(name, "Scene group name", 120)
+        description = _text(description, "Scene group description", 2000, required=False)
+        with self.repository._connection() as connection:
+            row = connection.execute(
+                "INSERT INTO counterpart_split_groups (id,name,description) VALUES (%s,%s,%s) RETURNING *",
+                (str(uuid4()), name, description),
+            ).fetchone()
+            return _json({**row, "split": split_for_group(str(row["id"]))})
+
+    def list_split_groups(self) -> list[dict]:
+        with self.repository._connection() as connection:
+            rows = connection.execute(
+                "SELECT * FROM counterpart_split_groups ORDER BY created_at DESC,id"
+            ).fetchall()
+            return _json([{**row, "split": split_for_group(str(row["id"]))} for row in rows])
+
+    @staticmethod
+    def _split_group(connection, group_id: str) -> dict:
+        row = connection.execute(
+            "SELECT * FROM counterpart_split_groups WHERE id=%s", (_uuid(group_id, "Scene group"),)
+        ).fetchone()
+        if row is None:
+            raise NotFound("Scene group not found")
+        return row
+
+    @staticmethod
+    def _invite_group_view(connection, row: dict) -> dict:
+        result = dict(row)
+        group = (
+            CollectionRepository._split_group(connection, str(row["split_group_id"]))
+            if row.get("split_group_id") is not None
+            else None
+        )
+        result["split_group_name"] = group["name"] if group else None
+        return result
+
     def create_invite(
         self,
         campaign_id: str,
@@ -160,6 +233,7 @@ class CollectionRepository:
         expires_in_hours: int = 72,
         max_sessions: int = 20,
         label: str = "",
+        split_group_id: str | None = None,
     ) -> dict:
         label = _text(label, "Invite label", 120, required=False)
         if (
@@ -177,11 +251,13 @@ class CollectionRepository:
         token = secrets.token_urlsafe(32)
         with self.repository._connection() as connection:
             self._campaign(connection, campaign_id)
+            if split_group_id is not None:
+                split_group_id = str(self._split_group(connection, split_group_id)["id"])
             row = connection.execute(
                 "INSERT INTO counterpart_collection_invites "
-                "(id,campaign_id,token_hash,label,expires_at,max_sessions) "
-                "VALUES (%s,%s,%s,%s,clock_timestamp()+(%s*interval '1 hour'),%s) RETURNING "
-                "id,campaign_id,label,expires_at,max_sessions,sessions_created,revoked_at,created_at",
+                "(id,campaign_id,token_hash,label,expires_at,max_sessions,split_group_id) "
+                "VALUES (%s,%s,%s,%s,clock_timestamp()+(%s*interval '1 hour'),%s,%s) RETURNING "
+                "id,campaign_id,label,expires_at,max_sessions,sessions_created,revoked_at,created_at,split_group_id",
                 (
                     str(uuid4()),
                     campaign_id,
@@ -189,20 +265,25 @@ class CollectionRepository:
                     label,
                     expires_in_hours,
                     max_sessions,
+                    split_group_id,
                 ),
             ).fetchone()
-            return _json({**row, "token": token})
+            return _json({**self._invite_group_view(connection, row), "token": token})
 
     def list_invites(self, campaign_id: str) -> list[dict]:
         with self.repository._connection() as connection:
             self._campaign(connection, campaign_id)
             return _json(
-                connection.execute(
-                    "SELECT id,campaign_id,label,expires_at,max_sessions,sessions_created,"
-                    "revoked_at,created_at "
-                    "FROM counterpart_collection_invites WHERE campaign_id=%s ORDER BY created_at DESC,id",
-                    (campaign_id,),
-                ).fetchall()
+                [
+                    self._invite_group_view(connection, row)
+                    for row in connection.execute(
+                        "SELECT id,campaign_id,label,expires_at,max_sessions,sessions_created,"
+                        "revoked_at,created_at,split_group_id "
+                        "FROM counterpart_collection_invites WHERE campaign_id=%s "
+                        "ORDER BY created_at DESC,id",
+                        (campaign_id,),
+                    ).fetchall()
+                ]
             )
 
     def revoke_invite(self, campaign_id: str, invite_id: str) -> dict:
@@ -210,12 +291,12 @@ class CollectionRepository:
             row = connection.execute(
                 "UPDATE counterpart_collection_invites SET revoked_at=coalesce(revoked_at,clock_timestamp()) "
                 "WHERE id=%s AND campaign_id=%s RETURNING "
-                "id,campaign_id,label,expires_at,max_sessions,sessions_created,revoked_at,created_at",
+                "id,campaign_id,label,expires_at,max_sessions,sessions_created,revoked_at,created_at,split_group_id",
                 (_uuid(invite_id, "Invitation"), _uuid(campaign_id, "Collection")),
             ).fetchone()
             if row is None:
                 raise NotFound("Invitation not found")
-            return _json(row)
+            return _json(self._invite_group_view(connection, row))
 
     @staticmethod
     def _invite(connection, token: str, *, lock: bool = False) -> dict:
@@ -243,6 +324,8 @@ class CollectionRepository:
                         "label": invite["label"],
                         "expires_at": invite["expires_at"],
                         "remaining_sessions": max(0, invite["max_sessions"] - invite["sessions_created"]),
+                        "split_group_id": invite["split_group_id"],
+                        "split_group_name": self._invite_group_view(connection, invite)["split_group_name"],
                     },
                     "accepting": bool(
                         invite["unexpired"]
@@ -286,6 +369,11 @@ class CollectionRepository:
                 }
             if campaign["mode"] == "live" and not allow_new_live:
                 raise Conflict("live_disabled", "Cloud inference is not enabled for new collector sessions")
+            if campaign["execution_contract"] is None:
+                raise Conflict(
+                    "execution_contract_migration_required",
+                    "This historical collection has no frozen detector contract; create a new collection.",
+                )
             if not campaign["active"]:
                 raise Conflict(
                     "collection_paused", "This collection is paused; saved evidence remains available"
@@ -296,6 +384,21 @@ class CollectionRepository:
             if progress["remaining_pairs"] == 0:
                 raise Conflict("collection_complete", "This collection has reached its reviewed-pair target")
             session_id = str(uuid4())
+            group = (
+                self._split_group(connection, str(invite["split_group_id"]))
+                if invite["split_group_id"] is not None
+                else None
+            )
+            group_snapshot = (
+                None
+                if group is None
+                else {
+                    "schema_version": "counterpart.split-group.v1",
+                    "id": str(group["id"]),
+                    "kind": "operator_group",
+                    "name": group["name"],
+                }
+            )
             created = self.repository._create_session(
                 connection,
                 campaign["recipe"],
@@ -303,6 +406,8 @@ class CollectionRepository:
                 campaign["object_a"],
                 campaign["object_b"],
                 recipe_snapshot=campaign["recipe_snapshot"],
+                execution_contract=campaign["execution_contract"],
+                split_group_snapshot=group_snapshot,
                 campaign_id=str(campaign["id"]),
                 session_id=session_id,
                 token=self._session_token(token, session_id),
@@ -324,7 +429,7 @@ class CollectionRepository:
             return _json(
                 connection.execute(
                     "SELECT s.id,s.campaign_id,s.recipe,s.mode,s.object_a,s.object_b,"
-                    "s.state,s.revision,s.epoch,"
+                    "s.state,s.revision,s.epoch,s.split_group_snapshot,"
                     "s.created_at,p.id AS pair_id,coalesce(r.status,'pending') AS review_status,"
                     "coalesce(r.version,0) AS review_version,"
                     "(SELECT count(*) FROM counterpart_captures c WHERE c.session_id=s.id "
@@ -526,8 +631,24 @@ class CollectionRepository:
             if not rows or (pair_ids is not None and len(rows) != len(pair_ids)):
                 raise Conflict("unreviewed_selection", "Every selected pair must currently be approved")
             asset_splits: dict[str, str] = {}
+            group_splits: dict[str, str] = {}
             for row in rows:
                 manifest = row["manifest"]
+                provenance = manifest.get("split_provenance")
+                try:
+                    if "split_provenance" in manifest:
+                        group_id = validate_split_group(provenance, manifest["session_id"])["id"]
+                    else:
+                        group_id = manifest["session_id"]
+                    if manifest["split_group"] != group_id or manifest["split"] != split_for_group(group_id):
+                        raise ValueError("Recorded partition does not match its frozen group")
+                except (ValueError, KeyError) as error:
+                    raise Conflict(
+                        "invalid_split_provenance", "Pair split provenance is inconsistent"
+                    ) from error
+                previous_split = group_splits.setdefault(group_id, manifest["split"])
+                if previous_split != manifest["split"]:
+                    raise Conflict("split_leakage", "Related scene sessions cannot cross dataset partitions")
                 for slot in ("baseline", "counterpart"):
                     for frame in manifest[slot]["frames"]:
                         prior = asset_splits.setdefault(frame["asset_id"], manifest["split"])

@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
 from .dataset import examples
+from .evidence_revisions import HUMAN_BASIS
 
 
 def archive_response(
@@ -47,7 +48,9 @@ def archive_response(
                                 review=member["review"],
                                 release_id=manifest["id"],
                                 label_basis=(
-                                    "Machine evidence accepted in an explicit human review; "
+                                    HUMAN_BASIS
+                                    if pair.get("schema_version") == "counterpart.pair.v2"
+                                    else "Machine evidence accepted in an explicit human review; "
                                     "review is not independent ground truth."
                                 ),
                             )

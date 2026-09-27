@@ -137,11 +137,11 @@ class _HTTPAdapter:
     def __exit__(self, *_):
         self.close()
 
-    def _request(self, url: str, *, mutating: bool = False, **kwargs) -> dict:
+    def _request(self, url: str, *, mutating: bool = False, http_method: str = "POST", **kwargs) -> dict:
         # No redirects, eager unbounded response buffer, or automatic retries.
         try:
             with self._client.stream(
-                "POST", url, timeout=self._timeout, follow_redirects=False, **kwargs
+                http_method, url, timeout=self._timeout, follow_redirects=False, **kwargs
             ) as response:
                 status = response.status_code
                 if status != 200:

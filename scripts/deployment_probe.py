@@ -11,9 +11,11 @@ import hashlib
 import io
 import json
 import os
+import ssl
 import subprocess
 import time
 import zipfile
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -23,6 +25,25 @@ from dotenv import dotenv_values
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_URL = "http://127.0.0.1:18080"
+
+
+@dataclass(frozen=True)
+class DeploymentTarget:
+    """Explicitly allowlisted disposable harness targets, never user deployments."""
+
+    project: str = "counterpart-test"
+    base_url: str = BASE_URL
+    ca_file: Path | None = None
+    report_title: str = "isolated local Colima Linux/arm64 Docker Compose"
+
+    def __post_init__(self):
+        if (self.project, self.base_url) not in {
+            ("counterpart-test", BASE_URL),
+            ("counterpart-gap-test", "https://127.0.0.1:18443"),
+        }:
+            raise ValueError("Only fixed disposable deployment targets are allowed.")
+        if self.base_url.startswith("https://") and self.ca_file is None:
+            raise ValueError("HTTPS deployment requires explicit trusted certificate validation.")
 
 
 def wait_for(action, ready, *, seconds=45):
@@ -38,18 +59,19 @@ def wait_for(action, ready, *, seconds=45):
     raise RuntimeError("Disposable deployment did not reach the expected state in time.")
 
 
-def run(directory: Path, report_path: Path) -> dict:
+def run(directory: Path, report_path: Path, *, target: DeploymentTarget | None = None) -> dict:
+    target = target or DeploymentTarget()
     private = directory / "private"
     token = dotenv_values(private / "runtime.env")["COUNTERPART_OPERATOR_TOKEN"]
     environment = {
         **os.environ,
-        "DOCKER_HOST": f"unix://{Path.home()}/.colima/counterpart-test/docker.sock",
+        "DOCKER_HOST": f"unix://{Path.home()}/.colima/{target.project}/docker.sock",
         "DOCKER_CONFIG": str(directory / "docker"),
     }
     compose = [
         str(directory / "tools/docker-compose"),
         "--project-name",
-        "counterpart-test",
+        target.project,
         "--env-file",
         str(private / "compose.env"),
         "-f",
@@ -76,13 +98,36 @@ def run(directory: Path, report_path: Path) -> dict:
     def control(*arguments):
         return command(compose + list(arguments))
 
-    with httpx.Client(base_url=BASE_URL, headers={"Origin": BASE_URL}, timeout=20) as operator:
-        with httpx.Client(base_url=BASE_URL, headers={"Origin": BASE_URL}, timeout=20) as collector:
+    verify = ssl.create_default_context(cafile=str(target.ca_file)) if target.ca_file else True
+    options = {
+        "base_url": target.base_url,
+        "headers": {"Origin": target.base_url},
+        "timeout": 20,
+        "verify": verify,
+        "trust_env": False,
+    }
+    if target.ca_file:
+        # CPython intentionally omits SNI for an IP URL. Connect to fixed
+        # loopback while validating and selecting the named test certificate.
+        # This uses HTTPX/httpcore's request extension; validation stays on.
+        def named_tls(request):
+            request.extensions["sni_hostname"] = "counterpart.test"
+
+        options["event_hooks"] = {"request": [named_tls]}
+    with httpx.Client(**options) as operator:
+        with httpx.Client(**options) as collector:
             health = operator.get("/api/health").raise_for_status().json()
             assert not health["live_enabled"] and not health["export_enabled"]
             assert operator.get("/api/operator/campaigns").status_code == 401
             assert operator.post("/api/operator/bootstrap").status_code == 403
-            operator.post("/api/operator/login", json={"token": token}).raise_for_status()
+            login = operator.post("/api/operator/login", json={"token": token}).raise_for_status()
+            if target.ca_file:
+                cookie = login.headers["set-cookie"].lower()
+                assert "; secure" in cookie and "; httponly" in cookie and "samesite=strict" in cookie
+                assert operator.post(
+                    "/api/operator/login", json={"token": token},
+                    headers={"Origin": "https://unrelated.example"},
+                ).status_code == 403
             worker_state = wait_for(
                 lambda: operator.get("/api/operator/runtime").raise_for_status().json(),
                 lambda state: state["workers"]["active_workers"] == 1,
@@ -225,6 +270,71 @@ def run(directory: Path, report_path: Path) -> dict:
 
             assets, examples, archive_bytes = archive_counts()
             assert assets == 2 and examples == 2
+            gap_checks = {}
+            visual_revision = None
+            evidence_path = f"/api/operator/sessions/{session['id']}/evidence"
+            if target.project == "counterpart-gap-test":
+                detail = operator.get(evidence_path).raise_for_status().json()
+                candidate = next(
+                    item for item in detail["captures"] if item["capture"]["slot"] == "counterpart"
+                )
+                original_capture = current()["latest_capture"]
+                reverify_path = (
+                    f"/api/operator/sessions/{session['id']}/captures/{candidate['capture']['id']}/reverify"
+                )
+                body = {
+                    "expected_version": candidate["revision_version"],
+                    "expected_evidence_sha256": candidate["evidence_sha256"],
+                    "recipe_version": "2.0.0", "idempotency_key": uuid4().hex,
+                }
+                visual_revision = operator.post(reverify_path, json=body).raise_for_status().json()
+                assert visual_revision["recipe_snapshot"]["recipe_version"] == "2.0.0"
+                assert visual_revision["original_recipe_snapshot"]["recipe_version"] == "1.0.0"
+                # A stricter verifier can find the recorded baseline uncertain.
+                # In that case the counterpart correctly lacks an accepted new
+                # baseline, while its independently rechecked reference still
+                # proves the actual v2 native image path executed.
+                visual_results = [visual_revision["result"], visual_revision.get("reference_result") or {}]
+                assert any(item.get("evidence", {}).get("visual") for item in visual_results)
+                assert visual_revision["reference_result"]["outcome"] == "unknown"
+                assert visual_revision["result"]["code"] == "baseline_required"
+                assert visual_revision["comparison"]["status"] == "blocked_reference_unknown"
+                assert visual_revision["comparison"]["outcome"] == "unknown"
+                assert operator.post(reverify_path, json=body).raise_for_status().json() == visual_revision
+                assert current()["latest_capture"] == original_capture
+                assert operator.get(release_path + "/manifest").raise_for_status().json() == released
+                # Execute native extension imports and inspect every gap schema
+                # in the built runtime; a v1 replay alone would miss wheel/ELF
+                # incompatibility and packaging omissions in optional paths.
+                native = json.loads(control(
+                    "exec", "-T", "api", "python", "-c",
+                    "import json,cv2,numpy as np;from counterpart.visual_checks import VISUAL_VERSION;"
+                    "print(json.dumps({'cv2':cv2.__version__,'numpy':np.__version__,"
+                    "'visual':VISUAL_VERSION,'finite':bool(np.isfinite(np.eye(3)).all()),"
+                    "'threads':cv2.getNumThreads()}))",
+                ))
+                assert native["finite"] and native["threads"] == 1
+                required_tables = {
+                    "counterpart_split_groups", "counterpart_evidence_revisions",
+                    "counterpart_attempt_reviews", "counterpart_baseline_authorizations",
+                    "counterpart_evidence_adjudications", "counterpart_annotation_snapshots",
+                    "counterpart_annotation_approvals", "counterpart_roboflow_deliveries",
+                    "counterpart_roboflow_delivery_events",
+                }
+                tables = set(control(
+                    "exec", "-T", "postgres", "psql", "-U", "counterpart", "-d", "counterpart", "-Atc",
+                    "SELECT tablename FROM pg_tables WHERE schemaname='public'",
+                ).splitlines())
+                assert required_tables <= tables
+                gap_checks = {
+                    "v2_saved_evidence_reverification": True,
+                    "v2_result_outcome": visual_revision["result"]["outcome"],
+                    "v2_result_code": visual_revision["result"]["code"],
+                    "v2_reference_outcome": (visual_revision.get("reference_result") or {}).get("outcome"),
+                    "v2_comparison_status": visual_revision["comparison"]["status"],
+                    "reverification_idempotent": True, "original_capture_and_release_unchanged": True,
+                    "runtime_native_libraries": native, "new_schema_tables_present": sorted(required_tables),
+                }
             # Restart all durable services, preserving only their named volumes.
             control("stop", "--timeout", "5", "worker", "api", "postgres")
             control("up", "-d", "--no-build", "--wait", "--wait-timeout", "90")
@@ -235,6 +345,11 @@ def run(directory: Path, report_path: Path) -> dict:
             assert current()["baseline"]["id"] == original_baseline
             assert operator.get(release_path + "/manifest").raise_for_status().json() == released
             assert archive_counts()[:2] == (assets, examples)
+            if visual_revision:
+                history = operator.get(evidence_path).raise_for_status().json()
+                revisions = [row for item in history["captures"] for row in item["revisions"]]
+                assert visual_revision in revisions
+                gap_checks["new_revision_persisted_after_restart"] = True
             runtime = operator.get("/api/operator/runtime").raise_for_status().json()
             assert runtime["inference"]["dispatch_attempts"] == {}, "Replay must not dispatch model calls."
             uid = control("exec", "-T", "api", "python", "-c", "import os;print(os.getuid())")
@@ -255,7 +370,7 @@ def run(directory: Path, report_path: Path) -> dict:
                 "image_id": command(
                     ["docker", "image", "inspect", "counterpart:local", "--format", "{{.Id}}"]
                 ),
-                "environment": "isolated local Colima Linux/arm64 Docker Compose",
+                "environment": target.report_title,
                 "vm_limits": {"cpus": 2, "memory_gib": 2, "data_disk_gib": 8, "root_disk_gib": 6},
                 "mode": "fixture_replay",
                 "cloud_calls": 0,
@@ -278,6 +393,7 @@ def run(directory: Path, report_path: Path) -> dict:
                     "provider_credentials_absent": True,
                 },
                 "archive": {"assets": assets, "examples": examples, "bytes": archive_bytes},
+                "gap_checks": gap_checks,
                 "initial_workers": worker_state["workers"]["active_workers"],
                 "limits": ["No physical camera validation", "No hosted S3 check", "No public TLS issuance"],
             }

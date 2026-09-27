@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "project": "Counterpart",
-  "status": "incomplete_original_scope",
+  "status": "complete",
   "authorized": "2026-09-26: user explicitly requested a persistent loop until the whole product is built",
   "objective": "Complete the operator-to-collector-to-reviewed-dataset product and its necessary reliable infrastructure; prove each acceptance gate with executed evidence.",
   "orchestrator_note": "Native create_goal was refused because this thread still has a paused unfinished CoverageCV goal. Do not falsely complete or resume that unrelated goal. This separate durable loop tracks Counterpart; it does not claim automatic execution after the session closes.",
@@ -22,7 +22,7 @@
     "No invented benchmarks",
     "No unrelated CoverageCV work"
   ],
-  "current_cycle": "Original-scope audit completed; missing implementation/benchmark work recorded in docs/ORIGINAL_SCOPE_AUDIT.md. No fixes claimed during audit.",
+  "current_cycle": "All independently executable original-scope software closure gates completed, independently reviewed and recorded. Physical-camera trial remains explicitly deferred; external entitlement/hosting gates remain disclosed.",
   "gates": {
     "research_and_original_capture_kernel": "verified checkpoint a51fa31; not complete product",
     "operator_campaign_and_invites": "verified software implementation; see research/software_validation.json and docs/VALIDATION_REPORT.md",
@@ -40,8 +40,8 @@
     "portable_dataset_consumer": "verified including real browser-generated downloads and hostile archive tests"
   },
   "software_checkpoints": {
-    "python_tests_passed": 752,
-    "browser_tests_passed": 17,
+    "python_tests_passed": 1043,
+    "browser_tests_passed": 30,
     "no_skipped_python_tests": true,
     "actual_product_browser_recipes": [
       "spatial",
@@ -57,12 +57,23 @@
   ],
   "previous_completion_claim_at": "2026-09-27T00:41:21.626568+00:00",
   "completion_correction": "The prior completed status covered a narrower implementation contract, not all original promises. Physical camera testing remains explicitly deferred, but independent code and benchmark gaps remain.",
-  "remaining_implementation": [
-    "Pin model/configuration to a collection/session and refuse incompatible continuation",
-    "Append immutable new-verifier decisions over saved evidence without rewriting prior results",
-    "Support explicit grouping of related sessions across dataset partitions",
-    "Measure end-to-end feedback freshness/p95 under increasing offered load against a bounded-queue baseline",
-    "Address or explicitly reconcile narrowed camera registration, extra-distractor and instance checks",
-    "Address or explicitly reconcile uncertain-attempt review and Roboflow annotation/dataset-version integration"
-  ]
+  "remaining_implementation": [],
+  "latest_authorization": "User requested thorough gap-closure loop with heavy attacks; reaffirmed Roboflow credits and explicitly authorized remaining $3.39 Modal credits, with $0 cash constraint.",
+  "closure_gates": {
+    "execution_model_pin": "Verified: immutable contracts, before-spend drift refusal, fresh/cache identity checks and historical migration.",
+    "versioned_reverification": "Verified: append-only comparisons, original evidence unchanged, reference uncertainty explained without changing verifier outputs.",
+    "related_session_split_groups": "Verified: global immutable scene groups across collections, releases and independent consumers.",
+    "feedback_load_comparison": "Verified50trials/100commits;2800independent arithmetic checks; strongestFIFO comparable; measured adaptive polling fix.",
+    "registration_identity_distractor_checks": "Verified v2 bounded classical registration/appearance/protected-object clauses and container native libraries; physical identity/calibration not claimed.",
+    "uncertain_attempt_adjudication": "Verified original refusal retained, baseline collection authority separate, human-origin pair plus separate release review.",
+    "roboflow_annotation_and_version_delivery": "Verified software and real generated-card annotation/version/officialCOCO transport; private camera destination requires entitlement.",
+    "integrated_frontend_consumer": "Verified30browser tests, actual UI/API/worker flows, independent downloaded archive consumer, final HTTPSmobilecomparison checks.",
+    "adversarial_full_stack_validation": "Verified1043Python tests, actual migrations/restore/processkill, final rebuiltHTTPScontainer restart/browser and resource cleanup."
+  },
+  "cloud_validation": {
+    "modal": "Completed184GPU predictions.58photos:53correct,5abstain,0wronganswered;25/29jointpairs. Both appsstopped0tasks; freshbilling$0billed. Metered reads varied$0.02\u2013$0.04increment; unsettled. No localML.",
+    "roboflow": "One reserved generated-fixture datasetversion; exact officialCOCOmembership/split/annotation verified. Productionprivacy guards unchanged."
+  },
+  "completed_at": "2026-09-27T02:18:03.916369+00:00",
+  "completion_scope": "All original-scope software gaps and independently executable validation, excluding user-deferred physical trial and disclosed external entitlement/hosting checks."
 }

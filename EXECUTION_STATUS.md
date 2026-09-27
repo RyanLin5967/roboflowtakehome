@@ -1,3 +1,35 @@
+# Original-scope software closure completed — 2026-09-27 UTC
+
+All seven audited software gaps are implemented and independently reviewed: frozen model/configuration contracts; append-only saved-evidence comparisons; immutable shared scene groups; measured bounded feedback scheduling; v2 registration/appearance/protected-object clauses; uncertainty review with separate baseline authority and human pair adjudication; Roboflow annotation review and hosted dataset-version receipts. The final comparison diagnostic preserves strict verifier output and exposes uncertain reference checks without inventing acceptance.
+
+## Final executed evidence
+
+- **1,043 Python tests passed**, zero skipped, 82.01 s. **30 browser tests passed**, 31.9 s, plus focused final API-field alignment. Ruff, TypeScript/Vite, wheel (all four SQL resources), diff checks and credential scans passed.
+- Actual compiled UI/API/PostgreSQL/worker capture/product/evidence workflows and independent downloaded ZIP consumers passed. Original refusals remain unchanged; human-origin pairs require separate release approval; related sessions share a split.
+- **50 real PostgreSQL load trials**, 100/100 committed captures observed, 2,800 independently recomputed checks. Stable-position FIFO is comparable; no universal scheduler win. Snapshot-reader p95 improved 1,594→475ms and1,495→432 ms with the active 250 ms condition; actual adaptive browser behavior is separately tested, not conflated with rendered latency.
+- Actual worker death: 10 checkpointed frame observations reused with zero additional HTTP calls/reservations; seven other collectors progressed. Old harness was correctly refused for fake-provider pin mismatch, then repaired without weakening production checks. Historical migration and real backup/restore preserve all nine new feature tables.
+- **Final rebuilt HTTPS container passed**: CA-verified TLS, secure cookies/security headers, actual v2 OpenCV/NumPy, revision idempotency, unchanged old evidence, worker kill/restart, full restart persistence,390 px Chromium comparison explanation and ZIP download. Disposable VM/containers/volumes/credentials removed; existing profile/native app preserved. `research/gap_deployment_probe.json` binds actual image and source hashes.
+- **Modal actually used:** 184 GPU predictions over 58 public photos including 120 warm timings. 53/58 relations correct, 5 abstentions, 0 wrong answered; 25/29 joint pairs. Warm GPU p50/p95 23.30/24.85 ms excludes network/queue/coldstart. All 29 visual checks remained uncertain on low-texture backgrounds. One pre-inference archive-format failure is preserved; both apps stopped with zero tasks. Billing reads showed $0 billed; unsettled usage increment varied $0.02–$0.04. No local ML.
+- **Roboflow actual transport:** corrected nonempty annotation readback, one reserved version-generation write, ready version 1 and genuine official COCO download verified. Ambiguous acknowledgement retained; no duplicate generation. Generated-card fixture only; production private-camera guards unchanged.
+
+## Remaining boundaries
+
+The user explicitly deferred physical-camera/temporal quality and collection-efficiency testing. Visual appearance checks do not prove physical identity; flat backgrounds can require human review. Current workspace still refuses private project creation with 422, so private camera export requires entitlement. Public hosting/certificate issuance, hosted S3-provider compatibility and remote GitHub CI are not executed. These are not secretly marked passed. No remote push was authorized for this new repository.
+
+## Resume / running app
+
+Work only in `/Users/idide/projects/roboflowtakehome`; this is Counterpart, separate from CoverageCV. App http://127.0.0.1:8080 ; workspace http://127.0.0.1:8080/#/workspace . Final native health 200; no pending jobs. API session 90628 / PID 69883, worker session 95114 / PID 96360. Verify liveness before starting duplicates. Durable hosted inference ledger 8/512; do not reset it. Provider credentials remain outside the repository.
+
+`BUILD_LOOP.json` is complete for independently executable software gates. The unrelated native CoverageCV goal remains paused; do not alter it. Do not resume old experiments or resubmit saved provider calls. Read `docs/VALIDATION_REPORT.md`, `docs/ORIGINAL_SCOPE_AUDIT.md`, and the exact provider/load/deployment reports for evidence. Files persist; uninterrupted execution after session closure is not promised.
+
+---
+
+# Historical start of gap-closure loop — 2026-09-26
+
+User explicitly requested fixing all original-scope gaps thoroughly, with independent attacks/review. Implementation is active across model pinning, scene grouping, immutable evidence revisions, uncertainty adjudication, bounded classical visual checks, comparative feedback benchmark, Roboflow annotation/version integration and UI. First integrated Python pass: 1,006 passed; 28 browser interaction tests and actual capture/product/new-gap browser flows passed. Final expanded suite, load matrix and HTTPS container validation are underway. Physical-camera trial remains deferred. No local ML. User explicitly reaffirmed plentiful Roboflow credits and authorized the remaining $3.39 Modal credits; a bounded $0.80 cloud-only GPU probe is now reserved/running. Current Modal API shows $26.61 metered and $0 billed; the prior user-set $0 spend limit is not readable from the Starter API. Real Roboflow generated-card annotation/readback and one hosted dataset version with verified official COCO download passed, preserving the ambiguous generation acknowledgement without a second write. See BUILD_LOOP.json; native goal remains unrelated paused CoverageCV.
+
+---
+
 # Correction: original-scope audit found remaining work — 2026-09-26
 
 The user challenged the claim that everything from the original description was done. Root and two independent agents checked the original descriptions against source and evidence. **That completion claim was too broad.** The substantial tested build below is real, but does not cover every original capability. [Original-scope audit](docs/ORIGINAL_SCOPE_AUDIT.md) is the current authority for remaining work.

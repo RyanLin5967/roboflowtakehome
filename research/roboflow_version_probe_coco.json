@@ -1,0 +1,69 @@
+{
+  "test": {
+    "info": {
+      "year": "2026",
+      "version": "1",
+      "description": "Exported from roboflow.com",
+      "contributor": "",
+      "url": "https://public.roboflow.com/object-detection/undefined",
+      "date_created": "2026-09-27T01:50:38+00:00"
+    },
+    "licenses": [
+      {
+        "id": 1,
+        "url": "https://choosealicense.com/licenses/mit/",
+        "name": "MIT"
+      }
+    ],
+    "categories": [
+      {
+        "id": 0,
+        "name": "transport-test",
+        "supercategory": "none"
+      },
+      {
+        "id": 1,
+        "name": "generated_card_test",
+        "supercategory": "transport-test"
+      }
+    ],
+    "images": [
+      {
+        "id": 0,
+        "license": 1,
+        "file_name": "counterpart-8811df4d0498b5549def098f338f16f5bce0a02f8b6a66c0ac6783009741b544_png.rf.0ee89b924430484a5e192a90536b6a7f.jpg",
+        "height": 480,
+        "width": 800,
+        "date_captured": "2026-09-27T01:50:38+00:00",
+        "extra": {
+          "user_tags": [
+            "cp-asset-8811df4d0498b5549def098f338f16f5bce0a02f8b6a66c0ac6783009741b544"
+          ],
+          "name": "counterpart-8811df4d0498b5549def098f338f16f5bce0a02f8b6a66c0ac6783009741b544.png",
+          "user_metadata": {
+            "counterpart_asset_id": "8811df4d0498b5549def098f338f16f5bce0a02f8b6a66c0ac6783009741b544",
+            "counterpart_media_sha256": "8811df4d0498b5549def098f338f16f5bce0a02f8b6a66c0ac6783009741b544",
+            "counterpart_pair_id": "generated-annotation-roundtrip-20260927",
+            "counterpart_session_id": "generated-annotation-roundtrip-20260927"
+          }
+        }
+      }
+    ],
+    "annotations": [
+      {
+        "id": 1,
+        "image_id": 0,
+        "category_id": 1,
+        "bbox": [
+          160,
+          96,
+          320,
+          192
+        ],
+        "iscrowd": 0,
+        "area": 61440,
+        "segmentation": []
+      }
+    ]
+  }
+}

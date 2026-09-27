@@ -188,3 +188,89 @@ test('an unreceived capture from an old epoch is retained with an explicit retak
   await page.getByRole('button', { name: 'Discard local copy', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Retry saved capture' })).toHaveCount(0);
 });
+
+test('human-adjudicated publication renders immutable pair members even when machine references are empty', async ({ page }) => {
+  const service = await mockService(page);
+  const member = (slot: string, id: string) => ({ id, slot, status: 'rejected', revision: slot === 'baseline' ? 1 : 2, epoch: 0, created_at: '', frames: [{ asset_id: `asset-${id}`, t_ms: 0, width: 720, height: 440 }], result: { accepted: false, outcome: 'unknown', code: 'camera_registration_unknown', message: 'Machine could not establish registration.', checks: [], evidence: {}, verifier_version: 'fixture-v2' }, error: null });
+  service.session.state = 'published';
+  service.session.pair = { id: 'human-pair', manifest: { baseline: member('baseline', 'human-first'), counterpart: member('counterpart', 'human-second'), evidence_adjudication: { reason: 'Both original observations were independently reviewed.' } } };
+  await page.addInitScript(() => localStorage.setItem('counterpart.session.v1', JSON.stringify({ id: 'session-1234-5678', token: 'test-capability-not-a-provider-key' })));
+  await page.goto('/');
+  await expect(page.getByText('Established by human review', { exact: true })).toBeVisible();
+  await expect(page.getByRole('img', { name: 'First saved capture', exact: true })).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Second saved capture', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Download complete pair' })).toBeEnabled();
+  await expect(page.getByText('Observation accepted', { exact: true })).toHaveCount(0);
+  expect(service.session.baseline).toBeNull();
+  expect(service.session.counterpart).toBeNull();
+});
+
+test('operator-authorized uncertain baseline captures for human review after reconnect without automatic publication', async ({ page }) => {
+  const service = await mockService(page);
+  service.session.baseline = { id: 'uncertain-first', slot: 'baseline', status: 'rejected', revision: 1, epoch: 0, created_at: '', frames: [{ asset_id: 'uncertain-asset', t_ms: 0, width: 720, height: 440 }], result: { accepted: false, outcome: 'unknown', code: 'camera_registration_unknown', message: 'The camera could not be registered.', checks: [], evidence: {}, verifier_version: 'fixture-v2' }, error: null };
+  service.session.state = 'baseline_ready'; service.session.recovery_required = true;
+  service.session.human_review_required = true; service.session.baseline_authorization = { id: 'authorization-1' };
+  await page.addInitScript(() => localStorage.setItem('counterpart.session.v1', JSON.stringify({ id: 'session-1234-5678', token: 'test-capability-not-a-provider-key' })));
+  await page.goto('/');
+  await expect(page.getByText('Collecting for human review', { exact: true })).toBeVisible();
+  await expect(page.getByText('The scene has not been reverified after reconnection;', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Capture for human review' }).click();
+  await expect(page.getByRole('button', { name: 'Save the complete pair' })).toHaveCount(0);
+  await expect(page.getByText('Collecting for human review', { exact: true })).toBeVisible();
+  expect(service.session.pair).toBeNull();
+});
+
+test('outstanding live preview accelerates only snapshot reads, then returns to idle and pauses while hidden', async ({ page }) => {
+  const service = await mockService(page, { live: true });
+  const snapshots: number[] = [];
+  const previewPosts: number[] = [];
+  let inFlight = 0, maximumInFlight = 0;
+  let readyAt = Infinity;
+  let preview: any = null;
+  await page.route('**/api/sessions/session-1234-5678', async route => {
+    snapshots.push(Date.now()); inFlight++; maximumInFlight = Math.max(maximumInFlight, inFlight);
+    try {
+      // A real asynchronous transport delay catches overlapping polling chains.
+      await new Promise(resolve => setTimeout(resolve, 80));
+      if (preview && Date.now() >= readyAt) service.session.feedback = { ...preview, status: 'accepted', result: { accepted: true, code: 'accepted', message: 'Current preview ready.', checks: [], evidence: {}, verifier_version: 'fixture-v1' } };
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(service.session) });
+    } finally { inFlight--; }
+  });
+  await page.route('**/api/sessions/session-1234-5678/captures', async route => {
+    const raw = route.request().postData() || '';
+    expect(raw).toContain('"slot":"preview"');
+    previewPosts.push(Date.now()); readyAt = Date.now() + 900;
+    preview = { id: `preview-${previewPosts.length}`, slot: 'preview', status: 'queued', epoch: service.session.epoch, revision: service.session.revision, frames: [], result: null, error: null };
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ capture: preview, session: service.session }) });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Use my camera' }).click();
+  await page.getByRole('button', { name: 'Start a real capture' }).click();
+  await page.getByRole('button', { name: 'Open camera' }).click();
+  await expect(page.getByLabel('Live guidance')).toBeEnabled();
+  await page.getByLabel('Live guidance').check();
+  await expect(page.getByText('Current preview ready.', { exact: true })).toBeVisible({ timeout: 5000 });
+  const fastReads = snapshots.filter(time => time >= previewPosts[0]);
+  expect(fastReads.length).toBeGreaterThanOrEqual(2);
+  expect(fastReads[0] - previewPosts[0]).toBeLessThan(550);
+  for (let index = 1; index < fastReads.length; index++) expect(fastReads[index] - fastReads[index - 1]).toBeGreaterThanOrEqual(230);
+  expect(maximumInFlight).toBe(1);
+  await page.getByLabel('Live guidance').uncheck();
+  const idleStart = Date.now();
+  await page.waitForTimeout(1100);
+  expect(snapshots.filter(time => time > idleStart + 80)).toHaveLength(0);
+  await expect.poll(() => snapshots.some(time => time > idleStart + 1200), { timeout: 1400 }).toBe(true);
+  expect(previewPosts).toHaveLength(1);
+  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); });
+  const hiddenReads = snapshots.length;
+  await page.waitForTimeout(1700);
+  expect(snapshots).toHaveLength(hiddenReads);
+  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); document.dispatchEvent(new Event('visibilitychange')); });
+  await expect.poll(() => snapshots.length, { timeout: 600 }).toBeGreaterThan(hiddenReads);
+  await page.getByRole('button', { name: 'New collection', exact: false }).click();
+  const afterLeave = snapshots.length;
+  await page.waitForTimeout(1700);
+  expect(snapshots).toHaveLength(afterLeave);
+  expect(previewPosts).toHaveLength(1);
+  expect(maximumInFlight).toBe(1);
+});

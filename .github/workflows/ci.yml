@@ -22,6 +22,10 @@ jobs:
       COUNTERPART_EXPORT_ENABLED: "false"
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          # Upgrade tests execute the actual earlier application/schema, rather
+          # than a hand-written approximation of historical persisted data.
+          fetch-depth: 0
       - name: PostgreSQL 17 client for the actual backup and restore drill
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
@@ -66,5 +70,7 @@ jobs:
           trap 'kill "$counterpart_api_pid" "$counterpart_worker_pid" 2>/dev/null || true' EXIT
           node scripts/browser_smoke.mjs
           node scripts/browser_product_smoke.mjs
+          node scripts/gap_browser.mjs
+          uv run python scripts/inspect_release.py artifacts/gap-browser/dataset.zip --allow-replay --show 0
       - name: Multi-collector process-failure probe
         run: uv run python scripts/product_fault_probe.py

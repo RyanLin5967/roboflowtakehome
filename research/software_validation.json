@@ -1,20 +1,21 @@
 {
   "schema_version": "counterpart.software-validation.v1",
-  "recorded_at": "2026-09-27T00:41:21.626964+00:00",
-  "scope": "Executed verification of implemented features and isolated local container deployment; not proof of complete original proposal. See docs/ORIGINAL_SCOPE_AUDIT.md.",
+  "recorded_at": "2026-09-27T02:18:03.916369+00:00",
+  "scope": "All original-scope software gaps and independently executable validation, excluding user-deferred physical trial and disclosed external entitlement/hosting checks.",
   "python": {
-    "passed": 752,
+    "passed": 1043,
     "skipped": 0,
     "failed": 0,
-    "seconds": 42.22,
+    "seconds": 82.01,
     "command": "COUNTERPART_TEST_DSN=postgresql:///counterpart_test uv run pytest -q"
   },
   "browser_unit": {
-    "passed": 17,
+    "passed": 30,
     "failed": 0,
-    "seconds": 15.3,
+    "seconds": 31.9,
     "api": "mocked; actual browser media and persistence",
-    "command": "npm --prefix web test"
+    "command": "npm --prefix web test",
+    "final_field_alignment_focused_regression": "1 passed after final explanation field alignment; production build passed"
   },
   "capture_browser": {
     "kind": "Real browser/API/worker; synthetic observations, no model calls",
@@ -71,7 +72,8 @@
   "portable_consumer": {
     "actual_downloaded_archives": [
       "spatial",
-      "temporal"
+      "temporal",
+      "gap-human-adjudication"
     ],
     "passed": true,
     "fixture_opt_in_required": true
@@ -81,8 +83,10 @@
     "typescript_vite": "passed",
     "python_wheel": "passed",
     "sql_resources_in_wheel": [
+      "schema.sql",
       "collection_schema.sql",
-      "schema.sql"
+      "evidence_schema.sql",
+      "delivery_schema.sql"
     ],
     "git_diff_check": "passed"
   },
@@ -90,8 +94,15 @@
     "new_hosted_photo_calls": 6,
     "image_reservations_after": 8,
     "image_reservation_limit": 512,
-    "modal_calls": 0,
-    "local_model_calls": 0
+    "modal_calls": 2,
+    "local_model_calls": 0,
+    "modal_successful_calls": 1,
+    "modal_model_predictions": 184,
+    "modal_report": "research/modal_perception_probe.json",
+    "roboflow_generated_fixture_versions": 1,
+    "roboflow_version_report": "research/roboflow_version_probe.json",
+    "latest_modal_billed_usd": 0,
+    "modal_usage_estimate_note": "Post-run metered increase displayed$0.04 then$0.02; not a settled invoice. Both apps stopped."
   },
   "unexecuted": [
     "actual physical collector study (user deferred)",
@@ -103,12 +114,16 @@
   ],
   "container_deployment": {
     "passed": true,
-    "report": "research/deployment_probe.json",
+    "report": "research/gap_deployment_probe.json",
+    "image_id": "sha256:be4d8b7416a19ba32166aaa36c25949faa4d0daa48e44a93595b255711c41ef1",
     "mode": "fixture_replay",
     "actual_image_built": true,
+    "verified_local_https": true,
     "authenticated_product_flow": true,
     "worker_failure_recovery": true,
     "full_service_restart_persistence": true,
+    "v2_native_visual_checks": true,
+    "comparison_uncertainty_explained": true,
     "compiled_mobile_browser": true,
     "cloud_calls": 0,
     "disposable_environment_removed": true
@@ -117,6 +132,79 @@
     "all_original_capabilities_complete": false,
     "report": "docs/ORIGINAL_SCOPE_AUDIT.md",
     "existing_test_evidence_unchanged": true,
-    "application_fixes_during_audit": false
+    "application_fixes_during_audit": false,
+    "application_fixes_after_audit": true,
+    "all_original_software_gaps_implemented": true,
+    "all_original_software_gaps_closed": true
+  },
+  "gap_browser": {
+    "evidence_kind": "fixture_replay_with_scripted_human_review",
+    "cloud_calls": 0,
+    "actual_ui_api_database_worker": true,
+    "scene_group_selected": true,
+    "saved_observations_reverified": true,
+    "original_decision_unchanged": true,
+    "human_uncertainty_decision": true,
+    "known_failure_cannot_be_approved": true,
+    "human_pair_independently_reviewed_and_released": true,
+    "two_related_sessions_share_split": true,
+    "dataset_zip_downloaded": true,
+    "private_delivery_disabled": true,
+    "mobile_overflow": false,
+    "browser_errors": []
+  },
+  "feedback_matrix": {
+    "trials": 50,
+    "reports": [
+      "research/feedback_benchmark.json",
+      "research/feedback_followup.json"
+    ],
+    "independent_arithmetic_checks": 2800,
+    "discrepancies": 0,
+    "committed_captures_persisted_and_observed": 100,
+    "committed_captures_offered": 100,
+    "strongest_comparator": "Stable-position latest FIFO: comparable, mixed results; no universal scheduler performance advantage",
+    "source_unchanged_during_runs": true,
+    "status": "verified",
+    "active_reader_sensitivity_ms": {
+      "normal": {
+        "before_p95": 1594,
+        "after_p95": 475
+      },
+      "overload": {
+        "before_p95": 1495,
+        "after_p95": 432
+      }
+    },
+    "scope": "Synthetic model delays; actual database/snapshot reads, excludes HTTP/rendering. Adaptive browser policy separately tested."
+  },
+  "followup_checks": [
+    {
+      "test": "tests/test_modal_perception_probe.py",
+      "passed": 1,
+      "purpose": "fake-GPU late-failure isolation; no local model computation"
+    },
+    {
+      "test": "tests/test_feedback_benchmark.py",
+      "passed": 18,
+      "purpose": "Original policies and stronger stable-position FIFO"
+    }
+  ],
+  "process_faults_current_source": {
+    "passed": true,
+    "report": "research/product_fault_probe.gap.json",
+    "seconds": 3.92,
+    "fixture_regression_fixed": "Old harness pin did not match its fake HTTP runtime; updated canonical fixture contract, production checks unchanged.",
+    "other_collectors_progressed": 7,
+    "checkpointed_frames_reused": 10,
+    "additional_fake_http_calls": 0,
+    "additional_reservations": 0
+  },
+  "comparison_clarity": {
+    "strict_verifier_result_unchanged": true,
+    "revised_reference_checks_visible": true,
+    "known_errors_not_hidden": true,
+    "evidence_suite_passed": 21,
+    "independently_reviewed": true
   }
 }

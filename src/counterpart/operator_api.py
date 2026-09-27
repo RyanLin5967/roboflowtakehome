@@ -8,6 +8,7 @@ from pydantic import Field
 
 from .archives import archive_response
 from .collections import CollectionRepository
+from .execution_contract import build_execution_contract
 from .models import CreateSession, StrictModel
 from .repository import Conflict, NotFound
 from .security import COOKIE
@@ -27,6 +28,12 @@ class Invite(StrictModel):
     label: str = Field(default="", max_length=120)
     expires_in_hours: int = Field(default=72, ge=1, le=720)
     max_sessions: int = Field(default=20, ge=1, le=1000)
+    split_group_id: str | None = Field(default=None, min_length=36, max_length=36)
+
+
+class SplitGroup(StrictModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=2000)
 
 
 class InviteToken(StrictModel):
@@ -57,6 +64,11 @@ class Export(StrictModel):
 
 class CampaignActivity(StrictModel):
     active: bool
+
+
+class ExecutionMigration(StrictModel):
+    expected_revision: int = Field(ge=0, strict=True)
+    reason: str = Field(min_length=1, max_length=1000)
 
 
 def mount_operator(app, config, repo, media, auth, live_ready):
@@ -126,7 +138,17 @@ def mount_operator(app, config, repo, media, auth, live_ready):
     @operator.post("/campaigns", status_code=201)
     def create_campaign(body: Campaign):
         require_live(body.mode)
-        return collections.create_campaign(**body.model_dump())
+        return collections.create_campaign(
+            **body.model_dump(), execution_contract=build_execution_contract(config, mode=body.mode)
+        )
+
+    @operator.get("/split-groups")
+    def split_groups():
+        return {"split_groups": collections.list_split_groups()}
+
+    @operator.post("/split-groups", status_code=201)
+    def create_split_group(body: SplitGroup):
+        return collections.create_split_group(**body.model_dump())
 
     @operator.get("/campaigns/{campaign_id}")
     def campaign(campaign_id: str):
@@ -216,6 +238,17 @@ def mount_operator(app, config, repo, media, auth, live_ready):
     @operator.get("/sessions/{session_id}/evaluation")
     def evaluation(session_id: str):
         return repo.evaluation_snapshot(session_id)
+
+    @operator.post("/sessions/{session_id}/execution-contract/migrate")
+    def migrate_execution_contract(session_id: str, body: ExecutionMigration):
+        # The operator requests derivation from recorded proof. This HTTP route
+        # never accepts replacement model settings or adopts current defaults.
+        return repo.migrate_execution_contract(
+            session_id,
+            expected_revision=body.expected_revision,
+            reviewer="workspace-operator",
+            reason=body.reason,
+        )
 
     @operator.get("/sessions/{session_id}/assets/{asset_id}")
     def session_asset(session_id: str, asset_id: str):

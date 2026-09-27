@@ -81,7 +81,10 @@ def create_app(config: Settings | None = None, repository: Repository | None = N
     media = create_media_store(config)
     auth = OperatorAuth(config)
     from .destination import DestinationResolver
+    from .evidence_api import mount_evidence
+    from .execution_contract import build_execution_contract
     from .inference_runtime import InferenceRuntime
+    from .roboflow_delivery_api import mount_delivery
 
     inference = InferenceRuntime(repo, media, config, detector=None)
     destination = DestinationResolver(config)
@@ -205,6 +208,8 @@ def create_app(config: Settings | None = None, repository: Repository | None = N
         }
 
     mount_operator(app, config, repo, media, auth, live_ready)
+    mount_evidence(app, repo, media, auth)
+    mount_delivery(app, config, repo, auth)
 
     @app.post("/api/sessions", status_code=201)
     def create(body: CreateSession, request: Request):
@@ -218,7 +223,14 @@ def create_app(config: Settings | None = None, repository: Repository | None = N
                     "message": "Cloud inference is not enabled. Replay is available without model calls.",
                 },
             )
-        return repo.create_session(body.recipe, body.mode, body.object_a, body.object_b)
+        return repo.create_session(
+            body.recipe,
+            body.mode,
+            body.object_a,
+            body.object_b,
+            execution_contract=build_execution_contract(config, mode=body.mode),
+            protected_objects=body.protected_objects,
+        )
 
     @app.get("/api/sessions/{session_id}")
     def snapshot(session_id: str, session: Session):

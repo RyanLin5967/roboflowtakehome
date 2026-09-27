@@ -1,0 +1,31 @@
+{
+  "executed_at": "2026-09-27T01:24:22.058643+00:00",
+  "source": "deterministic_generated_card",
+  "privacy": "public_test_project_only",
+  "local_ml": false,
+  "generation_calls": 0,
+  "prior_image_annotation_attempt": "ambiguous_no_retry_readback_empty",
+  "media_sha256": "8811df4d0498b5549def098f338f16f5bce0a02f8b6a66c0ac6783009741b544",
+  "image_id": "10FmPj10jf1Pdxons2dv",
+  "upload_confirmed": true,
+  "annotation_ack": true,
+  "readback_status": 200,
+  "annotation": {
+    "key": "10FmPj10jf1Pdxons2dv.jpg",
+    "width": 800,
+    "height": 480,
+    "boxes": [
+      {
+        "label": "generated_card_test",
+        "x": 320,
+        "y": 192,
+        "width": 320,
+        "height": 192
+      }
+    ]
+  },
+  "split": "test",
+  "annotation_kind": "synthetic_fixture_ground_truth_not_human_review",
+  "human_capture_claim": false,
+  "model_accuracy_claim": false
+}

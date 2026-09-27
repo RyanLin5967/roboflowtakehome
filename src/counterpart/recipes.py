@@ -14,7 +14,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .verification import THRESHOLDS, VERIFIER_VERSION
 
@@ -23,6 +23,7 @@ ObjectClass = Literal["bottle", "cup", "book", "cell phone", "mouse"]
 SUPPORTED_OBJECTS: tuple[ObjectClass, ...] = ("bottle", "cup", "book", "cell phone", "mouse")
 SNAPSHOT_SCHEMA_VERSION = "counterpart.recipe/1"
 CURRENT_RECIPE_VERSION = "1.0.0"
+LIVE_RECIPE_VERSION = "2.0.0"
 
 
 class RecipeParameters(BaseModel):
@@ -32,11 +33,17 @@ class RecipeParameters(BaseModel):
 
     object_a: ObjectClass = "bottle"
     object_b: ObjectClass = "cup"
+    protected_objects: list[ObjectClass] = Field(default_factory=list, max_length=3)
 
     @model_validator(mode="after")
     def distinct_classes(self) -> RecipeParameters:
         if self.object_a == self.object_b:
             raise ValueError("Use two different classes; same-class instance identity is unsupported.")
+        if len(set(self.protected_objects)) != len(self.protected_objects) or set(self.protected_objects) & {
+            self.object_a,
+            self.object_b,
+        }:
+            raise ValueError("Protected objects must be distinct classes separate from the two roles.")
         return self
 
 
@@ -98,6 +105,39 @@ _V1_LIMITATIONS = (
     "Matching a class across captures does not establish the identity of a physical object.",
     "Supported classes are detector vocabulary, not a guarantee of accuracy for every object or scene.",
 )
+# Literal historical policy, independent of future implementation defaults.
+_V2_VISUAL_THRESHOLDS = (
+    ("maximum_image_side", 640),
+    ("maximum_features", 900),
+    ("minimum_features", 24),
+    ("minimum_inliers", 14),
+    ("minimum_inlier_ratio", 0.65),
+    ("minimum_support_area", 0.12),
+    ("minimum_support_cells", 4),
+    ("match_ratio", 0.75),
+    ("ransac_pixels", 2.0),
+    ("ransac_iterations", 500),
+    ("maximum_camera_corner_displacement", 0.025),
+    ("maximum_camera_scale_change", 0.03),
+    ("maximum_camera_rotation_degrees", 2.0),
+    ("protected_center_tolerance", 0.025),
+    ("protected_scale_tolerance", 0.15),
+    ("appearance_histogram_pass", 0.22),
+    ("appearance_histogram_fail", 0.65),
+    ("appearance_patch_pass", 0.20),
+    ("appearance_patch_fail", 0.35),
+    ("detection_mask_margin", 0.03),
+    ("ambiguity_confidence", 0.35),
+    ("minimum_confidence", 0.60),
+)
+_V2_VISUAL_LIMITATIONS = (
+    "Background registration estimates a 2-D similarity transform, not calibrated camera motion; "
+    "parallax, low texture, repeated texture, occlusion, and illumination changes can be inconclusive.",
+    "Appearance continuity cannot distinguish visually identical replacements and does not prove "
+    "physical-object identity. Appearance differences can also come from lighting or viewpoint.",
+    "Protected-object checks cover only declared, confidently detected classes; detector omissions "
+    "and undeclared scene changes can escape these checks.",
+)
 
 
 @dataclass(frozen=True)
@@ -128,7 +168,22 @@ def get_recipe(recipe: str, version: str = CURRENT_RECIPE_VERSION) -> RecipeDefi
     for definition in _DEFINITIONS:
         if definition.recipe == recipe and definition.version == version:
             return definition
+        if definition.recipe == recipe and version == LIVE_RECIPE_VERSION:
+            return RecipeDefinition(
+                recipe,
+                definition.title,
+                definition.description,
+                LIVE_RECIPE_VERSION,
+                "counterpart-verifier/2.0.0",
+            )
     raise RecipeContractError("Choose a supported recipe and exact recipe version.")
+
+
+def version_for_mode(mode: str) -> str:
+    """Only new live sessions opt into visual checks; old snapshots stay exact."""
+    if mode not in ("live", "replay"):
+        raise RecipeContractError("Choose a supported capture mode.")
+    return LIVE_RECIPE_VERSION if mode == "live" else CURRENT_RECIPE_VERSION
 
 
 def _canonical(value: Any) -> str:
@@ -144,14 +199,21 @@ def build_recipe_snapshot(
     object_b: str = "cup",
     *,
     recipe_version: str = CURRENT_RECIPE_VERSION,
+    protected_objects: list[str] | None = None,
 ) -> RecipeSnapshot:
     """Build a detached JSON contract. Persist it once when creating the session."""
     definition = get_recipe(recipe, recipe_version)
     try:
-        parameters = RecipeParameters(object_a=object_a, object_b=object_b)
+        parameters = RecipeParameters(
+            object_a=object_a,
+            object_b=object_b,
+            protected_objects=[] if protected_objects is None else protected_objects,
+        )
     except ValueError as exc:
         raise RecipeContractError("Choose two different supported object classes.") from exc
     a, b = parameters.object_a, parameters.object_b
+    if recipe_version == CURRENT_RECIPE_VERSION and parameters.protected_objects:
+        raise RecipeContractError("Protected objects require the visual recipe version.")
     common_setup = [
         f"Use exactly one {a} and one {b}; keep both fully visible.",
         "Fix the camera position, orientation, zoom and crop for both captures.",
@@ -232,6 +294,47 @@ def build_recipe_snapshot(
         "limitations": list(_V1_LIMITATIONS),
         "snapshot_sha256": "",
     }
+    if recipe_version == LIVE_RECIPE_VERSION:
+        snapshot["schema_version"] = "counterpart.recipe/2"
+        snapshot["protected_objects"] = sorted(parameters.protected_objects)
+        snapshot["verifier"]["visual"] = {
+            "version": "counterpart-visual/1.0.0",
+            "thresholds": dict(_V2_VISUAL_THRESHOLDS),
+        }
+        snapshot["clauses"] = [
+            {"name": "named_object_geometry", "required": True, "evaluation": "pass/fail/unknown"},
+            {"name": "background_registration", "required": True, "evaluation": "pass/fail/unknown"},
+            {"name": "appearance_continuity", "required": True, "evaluation": "pass/fail/unknown"},
+            *[
+                {
+                    "name": "protected_object",
+                    "class": label,
+                    "required": True,
+                    "evaluation": "pass/fail/unknown",
+                }
+                for label in sorted(parameters.protected_objects)
+            ],
+        ]
+        snapshot["controls"].extend(
+            [
+                "distributed background features support a stable 2-D camera registration",
+                "observed appearance continuity for each named object, without proving physical identity",
+                *[
+                    f"stable position, size and appearance of protected {label}"
+                    for label in sorted(parameters.protected_objects)
+                ],
+            ]
+        )
+        snapshot["limitations"].extend(_V2_VISUAL_LIMITATIONS)
+        snapshot["instructions"]["setup"].extend(
+            [
+                "Leave a textured background visible across the image for camera registration.",
+                *[
+                    f"Keep one {label} fully visible and unchanged throughout both captures."
+                    for label in sorted(parameters.protected_objects)
+                ],
+            ]
+        )
     payload = {key: value for key, value in snapshot.items() if key != "snapshot_sha256"}
     snapshot["snapshot_sha256"] = hashlib.sha256(_canonical(payload).encode("ascii")).hexdigest()
     return snapshot
@@ -243,13 +346,17 @@ def validate_recipe_snapshot(value: Any) -> RecipeSnapshot:
     Digest verification alone would allow a client to weaken thresholds and
     recompute its hash. Compare the whole authoritative contract instead.
     """
-    if not isinstance(value, dict) or value.get("schema_version") != SNAPSHOT_SCHEMA_VERSION:
+    if not isinstance(value, dict) or value.get("schema_version") not in (
+        SNAPSHOT_SCHEMA_VERSION,
+        "counterpart.recipe/2",
+    ):
         raise RecipeContractError("Unknown or missing recipe snapshot schema version.")
     expected = build_recipe_snapshot(
         value.get("recipe"),
         value.get("object_a"),
         value.get("object_b"),
         recipe_version=value.get("recipe_version"),
+        protected_objects=value.get("protected_objects"),
     )
     if _canonical(value) != _canonical(expected):
         raise RecipeContractError("Recipe snapshot differs from its registered version.")
@@ -260,11 +367,20 @@ def assert_runtime_compatible(value: Any) -> None:
     """Fail closed if executing a stored contract would use different rules."""
     snapshot = validate_recipe_snapshot(value)
     verifier = snapshot["verifier"]
-    if (
-        verifier["version"] != VERIFIER_VERSION
-        or _canonical(verifier["thresholds"]) != _canonical(THRESHOLDS)
-    ):
+    version = (
+        VERIFIER_VERSION
+        if snapshot["recipe_version"] == CURRENT_RECIPE_VERSION
+        else "counterpart-verifier/2.0.0"
+    )
+    if verifier["version"] != version or _canonical(verifier["thresholds"]) != _canonical(THRESHOLDS):
         raise RecipeContractError("The running verifier cannot execute this recipe version unchanged.")
+    if snapshot["recipe_version"] == LIVE_RECIPE_VERSION:
+        from .visual_checks import VISUAL_THRESHOLDS, VISUAL_VERSION
+
+        if verifier["visual"]["version"] != VISUAL_VERSION or _canonical(
+            verifier["visual"]["thresholds"]
+        ) != _canonical(dict(VISUAL_THRESHOLDS)):
+            raise RecipeContractError("The running verifier cannot execute this visual policy unchanged.")
 
 
 def legacy_recipe_snapshot(session: Mapping[str, Any]) -> RecipeSnapshot:
@@ -286,13 +402,16 @@ def recipe_catalogue() -> list[dict[str, Any]]:
     return [
         {
             "recipe": definition.recipe,
-            "recipe_version": definition.version,
+            "recipe_version": LIVE_RECIPE_VERSION,
+            "replay_recipe_version": CURRENT_RECIPE_VERSION,
             "title": definition.title,
             "description": definition.description,
             "supported_objects": list(SUPPORTED_OBJECTS),
             "requires_distinct_classes": True,
             "defaults": RecipeParameters().model_dump(),
-            "snapshot": deepcopy(build_recipe_snapshot(definition.recipe)),
+            "snapshot": deepcopy(
+                build_recipe_snapshot(definition.recipe, recipe_version=LIVE_RECIPE_VERSION)
+            ),
         }
         for definition in _DEFINITIONS
     ]

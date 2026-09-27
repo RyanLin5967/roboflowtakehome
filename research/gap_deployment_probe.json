@@ -1,0 +1,419 @@
+{
+  "executed_at": "2026-09-27T02:14:51.715980+00:00",
+  "source_revision": "eb58c78934aa02ca89ed32bc065ab4e6f73a7e84",
+  "image_id": "sha256:be4d8b7416a19ba32166aaa36c25949faa4d0daa48e44a93595b255711c41ef1",
+  "environment": "isolated local Colima Linux/arm64 HTTPS Docker Compose",
+  "vm_limits": {
+    "cpus": 2,
+    "memory_gib": 2,
+    "data_disk_gib": 8,
+    "root_disk_gib": 6
+  },
+  "mode": "fixture_replay",
+  "cloud_calls": 0,
+  "model_accuracy_claim": false,
+  "checks": {
+    "locked_image_build": true,
+    "postgres_api_worker_start": true,
+    "anonymous_operator_refused": true,
+    "local_bootstrap_refused": true,
+    "operator_login": true,
+    "invitation_collection": true,
+    "collector_cannot_be_operator": true,
+    "worker_sigkill_preserves_baseline": true,
+    "stopped_worker_queue_recovered": true,
+    "idempotent_publication": true,
+    "reviewed_immutable_release": true,
+    "archive_hash_readback": true,
+    "all_service_restart_persistence": true,
+    "nonroot_api_uid": 10001,
+    "provider_credentials_absent": true
+  },
+  "archive": {
+    "assets": 2,
+    "examples": 2,
+    "bytes": 71919
+  },
+  "gap_checks": {
+    "v2_saved_evidence_reverification": true,
+    "v2_result_outcome": "fail",
+    "v2_result_code": "baseline_required",
+    "v2_reference_outcome": "unknown",
+    "v2_comparison_status": "blocked_reference_unknown",
+    "reverification_idempotent": true,
+    "original_capture_and_release_unchanged": true,
+    "runtime_native_libraries": {
+      "cv2": "4.13.0",
+      "numpy": "2.5.3",
+      "visual": "counterpart-visual/1.0.0",
+      "finite": true,
+      "threads": 1
+    },
+    "new_schema_tables_present": [
+      "counterpart_annotation_approvals",
+      "counterpart_annotation_snapshots",
+      "counterpart_attempt_reviews",
+      "counterpart_baseline_authorizations",
+      "counterpart_evidence_adjudications",
+      "counterpart_evidence_revisions",
+      "counterpart_roboflow_deliveries",
+      "counterpart_roboflow_delivery_events",
+      "counterpart_split_groups"
+    ],
+    "new_revision_persisted_after_restart": true
+  },
+  "initial_workers": 1,
+  "limits": [
+    "No physical camera validation",
+    "No hosted S3 check",
+    "No public TLS issuance"
+  ],
+  "source_fingerprint": {
+    "sha256": "11f5b1d4c30a4f40f8bb8a20ab21b49243d6df26f2abb587fa34013b96a03453",
+    "files": [
+      {
+        "path": "Dockerfile",
+        "sha256": "8bb181439e287d10abde1879a006f6ad37d22d848e0358e78cd2239362e6927b"
+      },
+      {
+        "path": ".dockerignore",
+        "sha256": "ac6eb4cf49dc3e35e83f67e12f29179821f91ff783dbc194593e4b7baa6d6473"
+      },
+      {
+        "path": "pyproject.toml",
+        "sha256": "1829e89699a64eae3ddbfc0f27e3c957a54ce8238e9a2a4a7b2d6658629feece"
+      },
+      {
+        "path": "uv.lock",
+        "sha256": "d09d08b093b5a23fadc33d7334035fcbbc5a7d56c3f03e4d115ddf7416f95a2f"
+      },
+      {
+        "path": "compose.yaml",
+        "sha256": "62b35d32cbda79f79a5dd3d0162ca4f93b0c35bd14f6a40dc7f392ca5c4f8e24"
+      },
+      {
+        "path": "deploy/Caddyfile",
+        "sha256": "4e9b766d1cea1df2dec53adef9b009e2b67966667c29ac9d37d92d63a8d9bf34"
+      },
+      {
+        "path": "deploy/compose.tls.yaml",
+        "sha256": "0d043c3db8c231228e754d386d7ff6b86e7c82b29b6a74d70a02c8d272cde0ec"
+      },
+      {
+        "path": "src/counterpart/__init__.py",
+        "sha256": "3000d890a2c8a376773c5af17c6fff22ad7146f072534713855c3f39ce9202eb"
+      },
+      {
+        "path": "src/counterpart/api.py",
+        "sha256": "6e9f604dee5fd21161f548f847bd20a270c73faf2f799d92028c95c830989219"
+      },
+      {
+        "path": "src/counterpart/archives.py",
+        "sha256": "506f66f00707c64768bdca9b139f1b26a14cf35ec655bcba5aeed35101c87ad6"
+      },
+      {
+        "path": "src/counterpart/cli.py",
+        "sha256": "587c7c1f214dbdea50ab689e7eb0ca96ef120494c39d61a569b218e41123c1e6"
+      },
+      {
+        "path": "src/counterpart/collections.py",
+        "sha256": "3febf09b37f1089005f44de7e6772297052ce83896568fb570e1d2cff23408b4"
+      },
+      {
+        "path": "src/counterpart/config.py",
+        "sha256": "8deed1d613275ff424c0ca2bd87b2c4f9076a8a4b22c97f5ebc650f89f344267"
+      },
+      {
+        "path": "src/counterpart/consumer.py",
+        "sha256": "8bbe4375563cb867cfd4add8d4afa10c2cae281c10ac1d408594bb1d96ce7727"
+      },
+      {
+        "path": "src/counterpart/dataset.py",
+        "sha256": "2dd74a0116b032f5b28405fd61d51b7f4c024109041e17ac26fedf4057f58b91"
+      },
+      {
+        "path": "src/counterpart/destination.py",
+        "sha256": "fe0dc6fe1624214920cf8c08be7e6d8884f4e66a4aefb8acbd482928df6cf970"
+      },
+      {
+        "path": "src/counterpart/evidence_api.py",
+        "sha256": "7ae35b64432b95ecc3f035d5558e6f6380bccc5c5dda370e7ada314848f3f450"
+      },
+      {
+        "path": "src/counterpart/evidence_revisions.py",
+        "sha256": "40b6837185fd995331fdd0c6be9b547a66c030c2c65b00d846d8328571757c80"
+      },
+      {
+        "path": "src/counterpart/execution_contract.py",
+        "sha256": "fb0c716fc32e8fa810e5bf4ab562b0992c6e6cfe673b1573246a9e6b80aa66b5"
+      },
+      {
+        "path": "src/counterpart/export_admin.py",
+        "sha256": "01a74a5e6f1ef68dd6f9700b96975e931a46a4b316399ac499af52ac554837ef"
+      },
+      {
+        "path": "src/counterpart/exporting.py",
+        "sha256": "dfaa9cb53136f1a4c94bda4b512bfc03bf4089ccd75508630b1735cb6d21a27e"
+      },
+      {
+        "path": "src/counterpart/fixtures.py",
+        "sha256": "9d6d13c9484509e70ed3751e1d821e774792c0733132cec20b455f87c82c814c"
+      },
+      {
+        "path": "src/counterpart/inference_runtime.py",
+        "sha256": "0f846424ce760366bcfea263b87e0728dc7569f9caa39e72019cd4765717660e"
+      },
+      {
+        "path": "src/counterpart/lifecycle.py",
+        "sha256": "1f1097a531a5a246b47c81a4f34ecb85ab671b5c0aaa49409e42e8fa1f18e6bb"
+      },
+      {
+        "path": "src/counterpart/models.py",
+        "sha256": "e9c25328b0b74178fce4efadee4d67df3ab44df6811309e4ab5437883e4d32fe"
+      },
+      {
+        "path": "src/counterpart/object_storage.py",
+        "sha256": "b6a012d1861106fabddfd1554a797b2fe65ee62d9c6f98cbbd008deac4f5bfbb"
+      },
+      {
+        "path": "src/counterpart/operator_api.py",
+        "sha256": "2577e3b362778ca108bc608107d368e317a9eae632a8772145063382da23d92a"
+      },
+      {
+        "path": "src/counterpart/providers.py",
+        "sha256": "e30562f10c8e991b84b6cfa756cdd8c76e25ea65d620ff57b957f823babaf732"
+      },
+      {
+        "path": "src/counterpart/recipes.py",
+        "sha256": "c5cd2312e3371b551a3e67a35198c16fb67521633b145124e8ff62f980772d3b"
+      },
+      {
+        "path": "src/counterpart/repository.py",
+        "sha256": "c66e7df7d9a65e2bd20ca0d5862cb547aa674584d4eb5f41fd0cdd38d03ef62c"
+      },
+      {
+        "path": "src/counterpart/roboflow_delivery.py",
+        "sha256": "3d39cc936e6a657219d60069fd64181be271bf9e049337ccd7cb8fe7e4c1ddc9"
+      },
+      {
+        "path": "src/counterpart/roboflow_delivery_api.py",
+        "sha256": "3e8d83609b413a420421e4a646050344a83244a7ba19b8cbe9a0fffc2ec1375b"
+      },
+      {
+        "path": "src/counterpart/security.py",
+        "sha256": "709644b72810c5466a9890263ba3af3762bb97b2718a484066f5fbb8c89f1e0e"
+      },
+      {
+        "path": "src/counterpart/splits.py",
+        "sha256": "df9f9f5217285645895a56445c6835e73fc44108117da19126c1474d22cac80f"
+      },
+      {
+        "path": "src/counterpart/storage.py",
+        "sha256": "bab77ee1f95aa3db728e9e477004e038c2550c0ee6ff267244e257961c344853"
+      },
+      {
+        "path": "src/counterpart/verification.py",
+        "sha256": "807326c471328bfdd0d5f8fbfed4be583f3e4f9c4d9d037cc25033233700412a"
+      },
+      {
+        "path": "src/counterpart/visual_checks.py",
+        "sha256": "01273e0d78e785422b1bda5cdd08e19aec177f55b7c707c09810690654e199e7"
+      },
+      {
+        "path": "src/counterpart/worker.py",
+        "sha256": "3ffe43cf638cdcae638fc70614eafed6fb15384f95876741bfdbdea794c4e6d1"
+      },
+      {
+        "path": "src/counterpart/collection_schema.sql",
+        "sha256": "42d3b65791598ce03ccb1316db56dd6cc59614d0933a88628d7c7236dba260dc"
+      },
+      {
+        "path": "src/counterpart/delivery_schema.sql",
+        "sha256": "8d37ca8dfe7e542bdb681242d4c76f512c5e786b59d7b70eee54be9cf8a6b3de"
+      },
+      {
+        "path": "src/counterpart/evidence_schema.sql",
+        "sha256": "aecd46ea6dbaa6ff3767cdcb03cc06d5d65cee38bd44a29189937c151ba54626"
+      },
+      {
+        "path": "src/counterpart/schema.sql",
+        "sha256": "e721ab828d2f7da4f7338dcfeb79e216c6be52b7c2dc69edc68936ddf5d7196c"
+      },
+      {
+        "path": "web/README.md",
+        "sha256": "75f366857206ed8a61ad95f2ee1bcb18a491f675f263390f5f358d97be8be7b7"
+      },
+      {
+        "path": "web/index.html",
+        "sha256": "5eeb6ac1c43cb62aa1c69485490496e9f232c709fd3b75b06ca19d46ee219556"
+      },
+      {
+        "path": "web/package-lock.json",
+        "sha256": "ee30a7e791629b000cb6b20eb8da5d7cb23e8024825e6a02a3a60322583051e5"
+      },
+      {
+        "path": "web/package.json",
+        "sha256": "d1e804304ba0ced91bff178b43f2faa800a9cbb5e73ce3499722cf7cc7cfbbdc"
+      },
+      {
+        "path": "web/playwright.config.ts",
+        "sha256": "ffb913a5183160e38a0381f3f0eddc2b94ccbba6e5eaeaf8e8ea680474bcd8c4"
+      },
+      {
+        "path": "web/src/App.tsx",
+        "sha256": "0a0d8a7ba27ebae7093110f94977d8f0b66275676c3300d2ec17e35e497758e2"
+      },
+      {
+        "path": "web/src/CampaignForm.tsx",
+        "sha256": "e685cea0e9960f1951db9252108a05ebeafed214af5c82fbd72c61375364ad0f"
+      },
+      {
+        "path": "web/src/CollectionContract.tsx",
+        "sha256": "820fbdd862518a5b6612f408794805c9ad827d689fd3bfea10e582b4c7a7a6ec"
+      },
+      {
+        "path": "web/src/CollectionDetail.tsx",
+        "sha256": "fdd50c59c2add94f152914881f1c8427488271e88a0f2d3388a189980ad5db12"
+      },
+      {
+        "path": "web/src/Evidence.tsx",
+        "sha256": "c6e93ea0dc8832d8284e4483f40cbedc9713a1a1f9640627f314379e176cf3a7"
+      },
+      {
+        "path": "web/src/EvidenceWorkbench.tsx",
+        "sha256": "07cbb4f3aa81ef01d7ab4a95ca58a0de380fe3d0c9173775e502a9c5f6b913ee"
+      },
+      {
+        "path": "web/src/Invites.tsx",
+        "sha256": "1a48401f2c535bc31c791f2b7bdea8361f8ecaade97b9d2a289f475daf305c10"
+      },
+      {
+        "path": "web/src/PairReview.tsx",
+        "sha256": "bca056ee9ffc2350c98bb6541823c91112f5f07151b0395bdcee3843e0f9549f"
+      },
+      {
+        "path": "web/src/Product.tsx",
+        "sha256": "bd54fcbc2ecf4587f720d291ee80768dd3d0345190988c151adea8eb17122529"
+      },
+      {
+        "path": "web/src/RecordedChecks.tsx",
+        "sha256": "f451bac7cc58977c42b599dd7dda6d841f337804117e61cb0a91b4bb6c67e947"
+      },
+      {
+        "path": "web/src/ReleaseDelivery.tsx",
+        "sha256": "ca3f0640010cc1887a3349c92d508ba0a25ffba97cae0a92e1ff4a695aa6d9a0"
+      },
+      {
+        "path": "web/src/Shell.tsx",
+        "sha256": "550477520b60628d4b8a86775ce7cc1f8fdd0a3fcc26a965338360bba8762ecc"
+      },
+      {
+        "path": "web/src/Workspace.tsx",
+        "sha256": "6ecaaadf7085879021fc5d4b0d3129c5c5dfe1ad2e827cb829fbba442f497035"
+      },
+      {
+        "path": "web/src/api.ts",
+        "sha256": "1fdaf988d68382688c407d065a45920537ec38d88c1478a5980f434cde5382ec"
+      },
+      {
+        "path": "web/src/camera.ts",
+        "sha256": "d2adbc889a2111e48d6a9b1ddd712138deefffc9749f614b9a9153f5a67f8cbd"
+      },
+      {
+        "path": "web/src/main.tsx",
+        "sha256": "9a1d549fd218fd852410776abb093fb9154c6b64c76d5a9f50a9957ab91e4f21"
+      },
+      {
+        "path": "web/src/product.css",
+        "sha256": "09b3f1a76e3f54a531fb8cbd7a847d99b600fb12b3733b49697836e992bb6ef5"
+      },
+      {
+        "path": "web/src/productApi.ts",
+        "sha256": "b3dd40fc36b2662da721f029422be3029deea777bb3964b3a3d16046da90f197"
+      },
+      {
+        "path": "web/src/styles.css",
+        "sha256": "bfb28717e18f78cb3ca653116d71b02cbffcd07b1985802861706f119ee67e55"
+      },
+      {
+        "path": "web/src/vite-env.d.ts",
+        "sha256": "65996936fbb042915f7b74a200fcdde7e410f32a669b1ab9597cfaa4b0faddb5"
+      },
+      {
+        "path": "web/tests/capture.spec.ts",
+        "sha256": "66ebd0ef130b38541999ea101f472c172b61b1f6eb9bdc83dea21a8f599190bc"
+      },
+      {
+        "path": "web/tests/product.spec.ts",
+        "sha256": "17e6b18ac7bda2eeadc01a3b804a4e2e70835d0ffcb751509e54ee8bb0221b32"
+      },
+      {
+        "path": "web/tsconfig.json",
+        "sha256": "49413717fb3fb94b3bcadd27f022dfd952b60507cb90757dfb168356d9aeb6dd"
+      },
+      {
+        "path": "web/vite.config.ts",
+        "sha256": "23ca9933ccacb452ae6367e04715864669796fbc82a99045b6d3cb11d9f180b6"
+      }
+    ]
+  },
+  "source_worktree_dirty": true,
+  "tools": {
+    "compose": {
+      "url": "https://github.com/docker/compose/releases/download/v5.5.1/docker-compose-darwin-aarch64",
+      "sha256": "998735c9b6fe68a4f05895e6ea73d71ad06f9fc7046383ad89e47346781b6af5"
+    },
+    "buildx": {
+      "url": "https://github.com/docker/buildx/releases/download/v0.37.1/buildx-v0.37.1.darwin-arm64",
+      "sha256": "c3cbbc820d578b0aa8158dd62ef1af25a0c8a75ef53331dbe4e219471e1dbe8c"
+    }
+  },
+  "tls": {
+    "python_certificate_validation": true,
+    "cookie_secure_httponly_samesite_strict": true,
+    "python_verified_server_name": "counterpart.test",
+    "cross_origin_login_refused": true,
+    "public_certificate_issuance": false,
+    "host_os_trust_modified": false
+  },
+  "browser": {
+    "browser": "Chromium",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "real_compiled_assets": true,
+    "browser_origin": "https://counterpart.test:18443",
+    "ephemeral_certificate_spki_pinned": true,
+    "global_certificate_errors_ignored": false,
+    "anonymous_login_gate": true,
+    "secure_httponly_strict_cookie": true,
+    "security_headers_present": true,
+    "fake_camera": {
+      "secure_context": true,
+      "camera_available": true,
+      "track_live": true,
+      "width": 640,
+      "height": 480,
+      "audio_tracks": 0
+    },
+    "physical_camera_test": false,
+    "existing_collection_opened": true,
+    "saved_images_rendered": true,
+    "comparison_uncertainty_explained": true,
+    "actual_revised_baseline_checks_rendered": true,
+    "release_download_bytes": 71919,
+    "viewport_overflow": false,
+    "page_errors": 0,
+    "correct_script_and_style_mime": true,
+    "token_absent_from_browser_storage": true,
+    "host_os_trust_modified": false
+  },
+  "cleanup": {
+    "dedicated_vm_containers_volumes_removed": true,
+    "docker_context_unchanged": true,
+    "existing_colima_profiles_unchanged": true,
+    "native_app_health": 200,
+    "private_directory_removed": true
+  }
+}

@@ -1,0 +1,108 @@
+{
+  "schema_version": "counterpart.generated-provider-probe.v1",
+  "created_at": "2026-09-27T01:49:06.379613+00:00",
+  "generation_allowance": 1,
+  "generation_attempts_reserved": 1,
+  "camera_images": 0,
+  "training_calls": 0,
+  "production_configuration_changed": false,
+  "user_credit_authorization": "User reaffirmed plentiful Roboflow credits on 2026-09-27 UTC",
+  "account_plan": {
+    "is_enterprise": false,
+    "is_pro": false,
+    "is_trial": false,
+    "over_quota": false
+  },
+  "billing_evidence": {
+    "plan_endpoint": "/usage/plan",
+    "rate_source": "https://roboflow.com/credits",
+    "version_images_per_credit": 20000,
+    "cash_control": "Official credit FAQ: free plans stop when included/prepaid credits are exhausted"
+  },
+  "private_project_attempt": "unavailable",
+  "private_project_http_status": 422,
+  "project": "counterpart-integration-test",
+  "project_public": true,
+  "frozen_inventory": [
+    {
+      "asset_id": "6afa0f8f1d4390067a6a3b61f8155268319d5d3916b25e2b5b8fabf284339780",
+      "image_id": "zPVO7BrQ2fNBrSvo9uSS",
+      "remote_name": "counterpart-6afa0f8f1d4390067a6a3b61f8155268319d5d3916b25e2b5b8fabf284339780.png",
+      "split": "test",
+      "width": 800,
+      "height": 480,
+      "boxes": [],
+      "annotation_sha256": "711f51701339607e6562f0f21194c6af57269e3d894d9784be98d018bf0e6c61",
+      "in_dataset": false
+    },
+    {
+      "asset_id": "8811df4d0498b5549def098f338f16f5bce0a02f8b6a66c0ac6783009741b544",
+      "image_id": "10FmPj10jf1Pdxons2dv",
+      "remote_name": "counterpart-8811df4d0498b5549def098f338f16f5bce0a02f8b6a66c0ac6783009741b544.png",
+      "split": "test",
+      "width": 800,
+      "height": 480,
+      "boxes": [
+        {
+          "label": "generated_card_test",
+          "bbox": [
+            160.0,
+            96.0,
+            320.0,
+            192.0
+          ]
+        }
+      ],
+      "annotation_sha256": "bd4d231fca73cc8eaece5c21f5b2d0c1ac30b76082fe0208d419aeb85bc32d73",
+      "in_dataset": true
+    }
+  ],
+  "before_versions": [],
+  "max_version_images": 1,
+  "estimated_version_credits": 5e-05,
+  "generation_status": "uncertain",
+  "settings": {
+    "preprocessing": {},
+    "augmentation": {}
+  },
+  "generation_error": "generation_outcome_unknown",
+  "generation_http_status": null,
+  "provider_version": 1,
+  "generation_receipt_confirmed": false,
+  "provider_version_source": "single_observed_candidate_not_write_receipt",
+  "version_state": {
+    "version": 1,
+    "ready": true,
+    "images": 1,
+    "splits": {
+      "train": 0,
+      "valid": 0,
+      "test": 1
+    }
+  },
+  "artifact_status": "verified",
+  "verified_at": "2026-09-27T01:50:42.953763+00:00",
+  "official_export_sha256": "2647558169b2328e2a255cd5489da5bb69e47cbc863a7d587c1f5e0c663b0c23",
+  "official_export_bytes": 10122,
+  "image_files": {
+    "test/counterpart-8811df4d0498b5549def098f338f16f5bce0a02f8b6a66c0ac6783009741b544_png.rf.0ee89b924430484a5e192a90536b6a7f.jpg": {
+      "bytes": 8187,
+      "sha256": "e9ecf9eae25b2e0545b46590f555062e314338750270e528da5f7d07cb768342"
+    }
+  },
+  "coco_proof": {
+    "sha256": "5671ff6b2d90cbb130e9cc0aaf7ceb18edcd4cc6e03b03bafc1b2e2d8b8adb1c",
+    "images": 1,
+    "split_counts": {
+      "train": 0,
+      "valid": 0,
+      "test": 1
+    },
+    "membership_splits_annotations_verified": true
+  },
+  "artifact_provenance": "downloaded from provider-returned official signed URL; URL not persisted",
+  "human_capture_claim": false,
+  "model_accuracy_claim": false,
+  "production_private_e2e": false,
+  "private_fixture_transport": false
+}

@@ -115,7 +115,7 @@ def review(system, campaign, pair, decision="approved", version=0, key=None):
 def test_campaign_snapshot_is_frozen_and_progress_counts_reviewed_pairs(system):
     repo, collections = system
     campaign = collection(system, target=2)
-    assert campaign["recipe_snapshot"]["recipe_version"] == "1.0.0"
+    assert campaign["recipe_snapshot"]["recipe_version"] == "2.0.0"
     assert campaign["progress"]["remaining_pairs"] == 2
     pair = publish(system, campaign)
     snapshot = repo.snapshot(pair["session_id"])
@@ -643,3 +643,222 @@ def test_release_exact_asset_leakage_gate_preserves_recorded_splits(system, same
             "train",
             "test",
         ]
+
+
+def test_named_scene_group_spans_campaigns_without_merging_display_names(system):
+    from counterpart.splits import split_for_group
+
+    repo, collections = system
+    first, second = collection(system), collection(system)
+    group = collections.create_split_group(" Kitchen table ", "Same room, lighting and physical objects")
+    different = collections.create_split_group("Kitchen table")
+    assert group["id"] != different["id"]
+    assert group["name"] == different["name"] == "Kitchen table"
+    assert len(collections.list_split_groups()) == 2
+    collected = []
+    for campaign in (first, second):
+        invite = collections.create_invite(campaign["id"], split_group_id=group["id"])
+        assert invite["split_group_id"] == group["id"]
+        assert invite["split_group_name"] == group["name"]
+        assert collections.list_invites(campaign["id"])[0]["split_group_id"] == group["id"]
+        info = collections.invite_info(invite["token"])["invite"]
+        assert info["split_group_id"] == group["id"]
+        for _ in range(2):
+            saved = collections.create_session_from_invite(invite["token"], uuid4().hex)["session"]
+            expected = {
+                "schema_version": "counterpart.split-group.v1",
+                "kind": "operator_group",
+                "id": group["id"],
+                "name": group["name"],
+            }
+            assert saved["split_group_snapshot"] == expected
+            saved = accept(repo, accept(repo, saved), "counterpart")
+            pair = repo.publish(saved["id"], saved["revision"])
+            assert pair["manifest"]["split_group"] == group["id"]
+            assert pair["manifest"]["split_provenance"] == expected
+            assert pair["manifest"]["split"] == split_for_group(group["id"])
+            review(system, campaign, pair)
+            collected.append(pair)
+        release = collections.export_manifests(campaign["id"])
+        assert release["pair_count"] == 2
+        assert release["split_counts"][split_for_group(group["id"])] == 2
+    assert len({pair["session_id"] for pair in collected}) == 4
+    assert len({pair["manifest"]["split"] for pair in collected}) == 1
+
+
+def test_independent_invite_default_never_overgroups_a_campaign(system):
+    _, collections = system
+    campaign = collection(system)
+    invitation = collections.create_invite(campaign["id"])
+    assert invitation["split_group_id"] is None and invitation["split_group_name"] is None
+    sessions = [
+        collections.create_session_from_invite(invitation["token"], uuid4().hex)["session"] for _ in range(3)
+    ]
+    assert {s["split_group_snapshot"]["id"] for s in sessions} == {s["id"] for s in sessions}
+    assert all(s["split_group_snapshot"]["kind"] == "session" for s in sessions)
+
+
+def test_grouped_concurrent_lost_response_joins_preserve_assignment_and_quota(system):
+    repo, collections = system
+    campaign = collection(system)
+    group = collections.create_split_group("Repeated captures in the same room")
+    invitation = collections.create_invite(campaign["id"], max_sessions=4, split_group_id=group["id"])
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(
+            pool.map(
+                lambda index: collections.create_session_from_invite(
+                    invitation["token"], f"same-attempt-{index % 4}"
+                ),
+                range(20),
+            )
+        )
+    assert len({r["session"]["id"] for r in results}) == 4
+    assert {r["session"]["split_group_snapshot"]["id"] for r in results} == {group["id"]}
+    assert collections.list_invites(campaign["id"])[0]["sessions_created"] == 4
+    with repo._connection() as connection:
+        assert connection.execute("SELECT count(*) AS n FROM counterpart_sessions").fetchone()["n"] == 4
+
+
+def test_session_and_invitation_group_assignment_cannot_be_retargeted(system):
+    from psycopg.types.json import Jsonb
+
+    repo, collections = system
+    campaign = collection(system)
+    first = collections.create_split_group("Original scene")
+    other = collections.create_split_group("Another scene")
+    invitation = collections.create_invite(campaign["id"], split_group_id=first["id"])
+    saved = collections.create_session_from_invite(invitation["token"], uuid4().hex)["session"]
+    original = copy.deepcopy(saved["split_group_snapshot"])
+    saved = accept(repo, saved)
+    with pytest.raises(psycopg.errors.CheckViolation, match="immutable"), repo._connection() as connection:
+        connection.execute(
+            "UPDATE counterpart_sessions SET split_group_snapshot=%s WHERE id=%s",
+            (Jsonb({**original, "id": other["id"], "name": other["name"]}), saved["id"]),
+        )
+    with pytest.raises(psycopg.errors.CheckViolation, match="immutable"), repo._connection() as connection:
+        connection.execute(
+            "UPDATE counterpart_collection_invites SET split_group_id=%s WHERE id=%s",
+            (other["id"], invitation["id"]),
+        )
+    assert repo.snapshot(saved["id"])["split_group_snapshot"] == original
+    assert collections.revoke_invite(campaign["id"], invitation["id"])["split_group_id"] == first["id"]
+
+
+@pytest.mark.parametrize("value", ["not-a-uuid", str(uuid4())])
+def test_unknown_group_never_creates_an_invitation(system, value):
+    _, collections = system
+    campaign = collection(system)
+    with pytest.raises(NotFound):
+        collections.create_invite(campaign["id"], split_group_id=value)
+    assert collections.list_invites(campaign["id"]) == []
+
+
+def test_group_metadata_changes_cannot_rewrite_session_pair_or_release_provenance(system):
+    repo, collections = system
+    campaign = collection(system)
+    group = collections.create_split_group("Frozen name")
+    invitation = collections.create_invite(campaign["id"], split_group_id=group["id"])
+    saved = collections.create_session_from_invite(invitation["token"], uuid4().hex)["session"]
+    saved = accept(repo, accept(repo, saved), "counterpart")
+    pair = repo.publish(saved["id"], saved["revision"])
+    review(system, campaign, pair)
+    release = collections.export_manifests(campaign["id"])
+    # Simulate a future display-name editor. The exported meaning is immutable.
+    with repo._connection() as connection:
+        connection.execute(
+            "UPDATE counterpart_split_groups SET name='Changed display' WHERE id=%s", (group["id"],)
+        )
+    repo.initialize()
+    assert repo.snapshot(saved["id"])["split_group_snapshot"]["name"] == "Frozen name"
+    assert collections.get_release(campaign["id"], release["id"]) == release
+    assert collections.get_pair(pair["id"])["manifest"] == pair["manifest"]
+
+
+def test_campaign_execution_contract_is_frozen_and_inherited_by_sessions(system):
+    from psycopg.types.json import Jsonb
+
+    repo, collections = system
+    campaign = collection(system)
+    session = start(system, campaign)
+    assert session["execution_contract"] == campaign["execution_contract"]
+    with pytest.raises(psycopg.errors.CheckViolation, match="immutable"), repo._connection() as connection:
+        connection.execute(
+            "UPDATE counterpart_campaigns SET execution_contract=%s WHERE id=%s",
+            (Jsonb({}), campaign["id"]),
+        )
+
+
+def test_release_refuses_split_group_hash_mismatch_without_persisting_release(system):
+    from psycopg.types.json import Jsonb
+
+    repo, collections = system
+    campaign = collection(system)
+    pair = publish(system, campaign)
+    review(system, campaign, pair)
+    altered = copy.deepcopy(pair["manifest"])
+    altered["split"] = "test" if altered["split"] != "test" else "train"
+    with repo._connection() as connection:
+        connection.execute(
+            "UPDATE counterpart_pairs SET manifest=%s WHERE id=%s", (Jsonb(altered), pair["id"])
+        )
+    with pytest.raises(Conflict) as error:
+        collections.export_manifests(campaign["id"])
+    assert error.value.code == "invalid_split_provenance"
+    assert collections.list_releases(campaign["id"]) == []
+
+
+def test_remote_export_and_local_release_accept_identical_scene_group_provenance(system):
+    from counterpart.exporting import InvalidExport, _assets, export_split
+
+    repo, collections = system
+    campaign = collection(system)
+    group = collections.create_split_group("A scene reused across sessions")
+    invite = collections.create_invite(campaign["id"], split_group_id=group["id"])
+    saved = collections.create_session_from_invite(invite["token"], uuid4().hex)["session"]
+    saved = accept(repo, accept(repo, saved), "counterpart")
+    pair = repo.publish(saved["id"], saved["revision"])
+    manifest = copy.deepcopy(pair["manifest"])
+    for slot in ("baseline", "counterpart"):
+        for frame in manifest[slot]["frames"]:
+            frame.pop("fixture_detections", None)
+            frame["detections"] = []
+            frame["media_type"] = "image/png"
+    assert len(_assets(manifest, pair["id"])) == 2
+    assert export_split(group["id"]) == manifest["split"]
+    manifest["split_provenance"]["id"] = str(uuid4())
+    with pytest.raises(InvalidExport):
+        _assets(manifest, pair["id"])
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"kind": "client_group"},
+        {"name": " "},
+        {"id": "not-a-uuid"},
+        {"id": "ABCD1234-0000-0000-0000-000000000000"},
+        {"schema_version": "counterpart.split-group.v2"},
+        {"extra": True},
+    ],
+)
+def test_frozen_group_provenance_rejects_ambiguous_or_forged_shapes(change):
+    from counterpart.splits import validate_split_group
+
+    snapshot = {
+        "schema_version": "counterpart.split-group.v1",
+        "id": str(uuid4()),
+        "kind": "operator_group",
+        "name": "Desk scene",
+    }
+    with pytest.raises(ValueError):
+        validate_split_group({**snapshot, **change}, str(uuid4()))
+
+
+def test_legacy_null_group_projection_preserves_original_partition():
+    from counterpart.splits import manifest_split, split_for_session
+
+    session_id = str(uuid4())
+    assert manifest_split({"id": session_id, "split_group_snapshot": None}) == {
+        "split_group": session_id,
+        "split": split_for_session(session_id),
+    }

@@ -6,9 +6,12 @@ infers absent observations or interprets detector confidence as certainty.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from copy import deepcopy
 from typing import Any
+from uuid import UUID
 
 VERIFIER_VERSION = "counterpart-verifier/1.0.0"
 THRESHOLDS = {
@@ -153,8 +156,10 @@ def _distance(left: list[float], right: list[float]) -> float:
     return math.hypot(left[0] - right[0], left[1] - right[1])
 
 
-def _baseline_observations(baseline: Any, recipe: str, labels: tuple[str, str]) -> list[dict]:
-    if not isinstance(baseline, dict) or baseline.get("accepted") is not True:
+def _baseline_observations(
+    baseline: Any, recipe: str, labels: tuple[str, str], *, reference_authorized: bool = False
+) -> list[dict]:
+    if not isinstance(baseline, dict) or not (baseline.get("accepted") is True or reference_authorized):
         _reject("baseline_required", "Record an accepted first capture before checking its counterpart.")
     evidence = baseline.get("evidence")
     if (
@@ -387,7 +392,7 @@ def _temporal_sequence(observations: list[dict], labels: tuple[str, str], checks
     }
 
 
-def verify(
+def _verify_v1(
     recipe: str,
     slot: str,
     frames: list[dict],
@@ -396,6 +401,7 @@ def verify(
     object_a: str = "bottle",
     object_b: str = "cup",
     interrupted: bool = False,
+    reference_authorized: bool = False,
 ) -> dict:
     """Return a versioned decision; malformed or ambiguous evidence fails closed.
 
@@ -444,7 +450,9 @@ def verify(
         )
         reference = None
         if slot in ("counterpart", "recovery") or (slot == "preview" and baseline is not None):
-            reference = _baseline_observations(baseline, recipe, labels)
+            reference = _baseline_observations(
+                baseline, recipe, labels, reference_authorized=reference_authorized
+            )
             _check_aspect(observations, reference[0], checks)
         _check_aspect(observations, observations[0], checks)
         if recipe == "spatial" or slot in ("preview", "recovery"):
@@ -566,3 +574,580 @@ def verify(
             "evidence": evidence,
             "verifier_version": VERIFIER_VERSION,
         }
+
+
+UNCERTAIN_CODES = frozenset(
+    {
+        "missing_object",
+        "ambiguous_object",
+        "low_confidence",
+        "object_near_border",
+        "object_too_small",
+        "unclear_relation",
+        "ambiguous_order",
+        "ambiguous_lanes",
+        "registration_uncertain",
+        "appearance_uncertain",
+        "protected_object_uncertain",
+        "visual_evidence_unavailable",
+    }
+)
+HARD_ERROR_CODES = frozenset(
+    {
+        "invalid_request",
+        "invalid_classes",
+        "invalid_frames",
+        "invalid_dimensions",
+        "invalid_timestamps",
+        "invalid_detections",
+        "invalid_geometry",
+        "invalid_frame_count",
+        "invalid_evidence",
+        "baseline_required",
+        "baseline_authorization_invalid",
+        "capture_interrupted",
+        "sequence_length",
+        "sequence_too_long",
+        "observation_gap",
+    }
+)
+
+
+def _independent_geometry(recipe, slot, frames, baseline, labels):
+    """Evaluate independent observable controls despite another clause's unknown.
+
+    V1 intentionally stops at its first error. V2 cannot use that behavior as an
+    adjudication gate: an ambiguous bottle must not conceal a visibly moved cup
+    or an invalid recording interval. Missing inputs produce unknown, while
+    independently known violations remain false.
+    """
+    checks = []
+
+    def record(name, passed, detail, code, **facts):
+        checks.append(
+            {
+                "name": name,
+                "outcome": "pass" if passed else "fail",
+                "passed": bool(passed),
+                "detail": detail,
+                "code": code,
+                "measurements": facts,
+            }
+        )
+
+    reference_frames = baseline.get("frames", []) if isinstance(baseline, dict) else []
+    parsed = {}
+    references = {}
+    for label in labels:
+        for target, raw in ((parsed, frames), (references, reference_frames)):
+            items = []
+            for index, frame in enumerate(raw):
+                try:
+                    observation = _parse_frames([frame], (label,))[0]
+                    items.append(observation)
+                except _Rejected as error:
+                    items.append(None)
+                    if target is parsed:
+                        checks.append(
+                            {
+                                "name": f"visible_object:{label}:{index}",
+                                "outcome": "unknown" if error.code in UNCERTAIN_CODES else "fail",
+                                "passed": False,
+                                "detail": error.message,
+                                "code": error.code,
+                            }
+                        )
+            target[label] = items
+    first = frames[0]
+    ratio = first["width"] / first["height"]
+    record(
+        "independent_image_aspect",
+        all(
+            abs((f["width"] / f["height"]) / ratio - 1) <= THRESHOLDS["aspect_ratio_tolerance"]
+            for f in frames
+        ),
+        "Keep the same image orientation and crop.",
+        "image_geometry_changed",
+    )
+    if reference_frames:
+        ratio = reference_frames[0]["width"] / reference_frames[0]["height"]
+        record(
+            "independent_pair_aspect",
+            all(
+                abs((f["width"] / f["height"]) / ratio - 1) <= THRESHOLDS["aspect_ratio_tolerance"]
+                for f in frames
+            ),
+            "Keep the saved image orientation and crop.",
+            "image_geometry_changed",
+        )
+    if recipe == "spatial":
+        if slot != "recovery" and all(parsed[label][0] is not None for label in labels):
+            combined = {"objects": {label: parsed[label][0]["objects"][label] for label in labels}}
+            relation = _relation(combined, labels)
+            expected = "right" if slot == "counterpart" or (slot == "preview" and baseline) else "left"
+            if relation == "unclear":
+                checks.append(
+                    {
+                        "name": "independent_requested_relation",
+                        "outcome": "unknown",
+                        "passed": False,
+                        "code": "unclear_relation",
+                        "detail": "The named objects do not establish a clear separated relation.",
+                    }
+                )
+            else:
+                record(
+                    "independent_requested_relation",
+                    relation == expected,
+                    f"Place the {labels[0]} to the {expected} of the {labels[1]}.",
+                    "wrong_relation",
+                )
+        for label in labels:
+            current = parsed[label][0]
+            reference = references[label][0] if references[label] else None
+            if current is None or reference is None:
+                continue
+            old, new = reference["objects"][label], current["objects"][label]
+            if label == labels[1]:
+                delta = _distance(old["center"], new["center"])
+                record(
+                    "independent_reference_position",
+                    delta <= THRESHOLDS["anchor_center_tolerance"],
+                    f"Keep the {label} in its saved position.",
+                    "reference_moved",
+                    delta=delta,
+                )
+            else:
+                delta = abs(old["center"][1] - new["center"][1])
+                record(
+                    "independent_moving_lane",
+                    delta <= THRESHOLDS["spatial_vertical_tolerance"],
+                    f"Keep the {label} in its saved horizontal lane.",
+                    "object_lane_changed",
+                    delta=delta,
+                )
+            tolerance = THRESHOLDS[
+                "anchor_scale_tolerance" if label == labels[1] else "moving_scale_tolerance"
+            ]
+            scale = _scale_difference(new, old)
+            record(
+                f"independent_scale:{label}",
+                scale <= tolerance,
+                f"Keep the {label} at its saved apparent size.",
+                "object_scale_changed",
+                scale_delta=scale,
+            )
+        return checks
+    if slot in ("baseline", "counterpart"):
+        times = [f["t_ms"] for f in frames]
+        count = len(times)
+        record("independent_sequence_length", 8 <= count <= 48, "Save 8 to 48 frames.", "sequence_length")
+        if count > 1:
+            gaps = [b - a for a, b in zip(times, times[1:], strict=False)]
+            record(
+                "independent_sampling_order",
+                all(g > 0 for g in gaps),
+                "Frame times must strictly increase.",
+                "invalid_timestamps",
+            )
+            record(
+                "independent_sampling_gaps",
+                max(gaps) <= THRESHOLDS["temporal_max_gap_ms"],
+                "The recording has an unobserved gap.",
+                "observation_gap",
+            )
+            record(
+                "independent_sequence_duration",
+                times[-1] - times[0] <= 12000,
+                "Keep the sequence within 12 seconds.",
+                "sequence_too_long",
+            )
+            record(
+                "independent_endpoint_duration",
+                min(gaps[0], gaps[-1]) >= 150,
+                "Pause at the initial and final observations.",
+                "unstable_endpoints",
+            )
+    intervals = {}
+    for label in labels:
+        observed = parsed[label]
+        available = [o for o in observed if o is not None]
+        reference = next((o for o in references[label] if o is not None), None)
+        if reference is None and available:
+            reference = available[0]
+        if reference is None:
+            continue
+        old = reference["objects"][label]
+        for index, observation in enumerate(observed):
+            if observation is None:
+                continue
+            new = observation["objects"][label]
+            delta = abs(old["center"][1] - new["center"][1])
+            record(
+                f"independent_lane:{label}:{index}",
+                delta <= THRESHOLDS["temporal_lane_tolerance"],
+                f"Keep the {label} in its horizontal lane.",
+                "object_lane_changed",
+                delta=delta,
+            )
+            scale = _scale_difference(new, old)
+            record(
+                f"independent_scale:{label}:{index}",
+                scale <= THRESHOLDS["moving_scale_tolerance"],
+                f"Keep the {label} at its apparent size.",
+                "object_scale_changed",
+                scale_delta=scale,
+            )
+        if slot not in ("baseline", "counterpart") or len(observed) < 2:
+            continue
+        for endpoint, indices, threshold, direction in (
+            ("start", (0, 1), THRESHOLDS["temporal_start_max_x"], "left"),
+            (
+                "finish",
+                (-2, -1),
+                THRESHOLDS["temporal_target_min_x"] + THRESHOLDS["temporal_boundary_guard"],
+                "right",
+            ),
+        ):
+            items = [observed[i] for i in indices if observed[i] is not None]
+            for index, item in enumerate(items):
+                x = item["objects"][label]["center"][0]
+                record(
+                    f"independent_{endpoint}:{label}:{index}",
+                    x <= threshold if direction == "left" else x >= threshold,
+                    f"Restore the {label}'s required {endpoint} position.",
+                    "invalid_start" if endpoint == "start" else "invalid_finish",
+                )
+            if len(items) == 2:
+                stable = _distance(*(item["objects"][label]["center"] for item in items)) <= 0.035
+                record(
+                    f"independent_endpoint_stability:{label}:{endpoint}",
+                    stable,
+                    f"Hold the {label} still at the endpoints.",
+                    "unstable_endpoints",
+                )
+        if references[label]:
+            for index in (0, -1):
+                if observed[index] is not None and references[label][index] is not None:
+                    delta = _distance(
+                        observed[index]["objects"][label]["center"],
+                        references[label][index]["objects"][label]["center"],
+                    )
+                    record(
+                        f"independent_matched_endpoint:{label}:{index}",
+                        delta <= 0.05,
+                        f"Match the {label}'s saved endpoint.",
+                        "endpoints_changed",
+                        delta=delta,
+                    )
+        # Check per-object arrival independently when that object's full trace
+        # is available, even if the other object's detector is ambiguous.
+        if len(available) == len(observed):
+            xs = [o["objects"][label]["center"][0] for o in observed]
+            times = [o["t_ms"] for o in observed]
+            entered = [x >= 0.62 for x in xs]
+            inside = [x >= 0.645 for x in xs]
+            if any(inside) and any(x <= 0.595 for x in xs[: inside.index(True)]):
+                entry, crossing = inside.index(True), entered.index(True)
+                outside = max(i for i in range(entry) if xs[i] <= 0.595)
+                sustained = (
+                    all(entered[crossing:])
+                    and all(inside[entry:])
+                    and entry < len(xs) - 1
+                    and times[entry + 1] - times[entry] >= 150
+                )
+                record(
+                    f"independent_sustained_arrival:{label}",
+                    sustained,
+                    f"The {label} must enter once and remain in the target band.",
+                    "unstable_arrival",
+                )
+                intervals[label] = (times[outside], times[entry])
+    if len(intervals) == 2:
+        order = sorted(labels, key=lambda label: intervals[label][1])
+        margin = intervals[order[1]][0] - intervals[order[0]][1]
+        if margin >= 150:
+            expected = list(labels if slot == "baseline" else reversed(labels))
+            record(
+                "independent_requested_order",
+                order == expected,
+                "Record the requested arrival order.",
+                "wrong_order",
+            )
+    # Lanes and target readiness can also be known even if other frames fail.
+    for index in range(len(frames)):
+        a, b = parsed[labels[0]][index], parsed[labels[1]][index]
+        if a is not None and b is not None:
+            separation = abs(a["objects"][labels[0]]["center"][1] - b["objects"][labels[1]]["center"][1])
+            if separation < 0.20:
+                checks.append(
+                    {
+                        "name": f"independent_lane_separation:{index}",
+                        "outcome": "unknown",
+                        "passed": False,
+                        "code": "ambiguous_lanes",
+                        "detail": "Use separate lanes.",
+                    }
+                )
+    return checks
+
+
+def adjudication_geometry_checks(
+    recipe: str,
+    slot: str,
+    frames: list[dict],
+    baseline: dict | None = None,
+    *,
+    object_a: str = "bottle",
+    object_b: str = "cup",
+) -> list[dict]:
+    """Non-mutating independent controls for human adjudication of old decisions.
+
+    This does not replace an original result or supply missing observations.
+    Reviewers must refuse any returned false clause, including a known failure
+    masked by an earlier unknown in the historical v1 fail-fast verifier.
+    """
+    try:
+        if recipe not in ("spatial", "temporal") or slot not in ("baseline", "counterpart"):
+            _reject("invalid_request", "Human pair review requires a supported evidence slot.")
+        if (
+            not isinstance(object_a, str)
+            or not isinstance(object_b, str)
+            or not object_a
+            or not object_b
+            or object_a == object_b
+        ):
+            _reject("invalid_classes", "Two distinct named object roles are required.")
+        _parse_frames(frames, ())
+        if not 1 <= len(frames) <= 48 or (recipe == "spatial" and len(frames) != 1):
+            _reject("invalid_frame_count", "Saved evidence has an invalid frame count.")
+        if baseline is not None:
+            _parse_frames(baseline.get("frames"), ())
+        return _independent_geometry(recipe, slot, frames, baseline, (object_a, object_b))
+    except _Rejected as error:
+        return [
+            {
+                "name": "evidence_structure",
+                "outcome": "fail",
+                "passed": False,
+                "code": error.code,
+                "detail": error.message,
+            }
+        ]
+
+
+def baseline_authorization_binding(recipe_snapshot: dict, baseline: dict) -> dict:
+    """Bind a separately recorded human authorization to one eligible baseline.
+
+    This is a binding/eligibility check, not an authority check: the API, worker
+    and consumer must obtain the authorization from their authenticated durable
+    review record. No client payload can make a worker trust a human decision.
+    Missing detector roles, known failed controls and corrupt evidence remain
+    ineligible. Original result.accepted stays false throughout this workflow.
+    """
+    from .recipes import assert_runtime_compatible, validate_recipe_snapshot
+
+    assert_runtime_compatible(recipe_snapshot)
+    snapshot = validate_recipe_snapshot(recipe_snapshot)
+    if (
+        snapshot["recipe_version"] != "2.0.0"
+        or not isinstance(baseline, dict)
+        or baseline.get("accepted") is not False
+        or baseline.get("outcome") != "unknown"
+        or baseline.get("hard_error") is not False
+        or not isinstance(baseline.get("checks"), list)
+        or not baseline["checks"]
+        or any(
+            not isinstance(c, dict)
+            or c.get("outcome") not in ("pass", "unknown")
+            or c.get("passed") is not (c.get("outcome") == "pass")
+            or (
+                c["outcome"] == "unknown"
+                and c.get("code")
+                not in {"registration_uncertain", "appearance_uncertain", "protected_object_uncertain"}
+            )
+            for c in baseline["checks"]
+        )
+        or not any(c.get("outcome") == "unknown" for c in baseline["checks"])
+        or baseline.get("recipe_snapshot_sha256") != snapshot["snapshot_sha256"]
+    ):
+        raise ValueError("Only an intact unknown visual baseline may be independently authorized.")
+    frames = baseline.get("frames")
+    strict = _verify_v1(
+        snapshot["recipe"], "baseline", frames, object_a=snapshot["object_a"], object_b=snapshot["object_b"]
+    )
+    if not strict["accepted"] or baseline.get("evidence", {}).get("slot") != "baseline":
+        raise ValueError("Named baseline roles and geometry must pass without human substitution.")
+    try:
+        observations = _parse_frames(frames, tuple(snapshot["protected_objects"]))
+        for label in snapshot["protected_objects"]:
+            original = observations[0]["objects"][label]
+            for observation in observations:
+                item = observation["objects"][label]
+                if (
+                    _distance(item["center"], original["center"]) > 0.025
+                    or _scale_difference(item, original) > 0.15
+                ):
+                    raise ValueError("Protected baseline objects must already have consistent geometry.")
+    except _Rejected as error:
+        raise ValueError("Protected baseline roles must be visible and unambiguous.") from error
+
+    def digest(value):
+        encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+        return hashlib.sha256(encoded.encode("ascii")).hexdigest()
+
+    return {
+        "schema_version": "counterpart.baseline-authorization/1",
+        "decision": "allow_counterpart",
+        "recipe_snapshot_sha256": snapshot["snapshot_sha256"],
+        "baseline_decision_sha256": digest({k: v for k, v in baseline.items() if k != "frames"}),
+        "baseline_frames_sha256": digest(frames),
+    }
+
+
+def verify(
+    recipe: str,
+    slot: str,
+    frames: list[dict],
+    baseline: dict | None = None,
+    *,
+    object_a: str = "bottle",
+    object_b: str = "cup",
+    interrupted: bool = False,
+    recipe_snapshot: dict | None = None,
+    media_reader=None,
+    baseline_authorization: dict | None = None,
+) -> dict:
+    """Execute the exact registered recipe; v1 semantics remain unchanged.
+
+    Visual v2 requires server-readable original bytes. Its unknown clauses are
+    review candidates, never automatic acceptance. Known failures dominate
+    unknowns, including failures independent of an uncertain detector result.
+    """
+    if recipe_snapshot is not None:
+        from .recipes import RecipeContractError, assert_runtime_compatible, validate_recipe_snapshot
+
+        assert_runtime_compatible(recipe_snapshot)
+        snapshot = validate_recipe_snapshot(recipe_snapshot)
+        if any(
+            snapshot[k] != v for k, v in (("recipe", recipe), ("object_a", object_a), ("object_b", object_b))
+        ):
+            raise RecipeContractError("Verification roles differ from the frozen recipe.")
+    else:
+        snapshot = None
+    authorized = False
+    authorization_invalid = False
+    if baseline_authorization is not None:
+        try:
+            if snapshot is None or not isinstance(baseline_authorization, dict):
+                raise ValueError("An exact registered recipe and authority record are required.")
+            binding = baseline_authorization_binding(snapshot, baseline)
+            if any(baseline_authorization.get(key) != value for key, value in binding.items()):
+                raise ValueError("The authorization belongs to different saved evidence.")
+            UUID(baseline_authorization["id"])
+            authorized = True
+        except (ValueError, TypeError, KeyError, AttributeError):
+            authorization_invalid = True
+    result = _verify_v1(
+        recipe,
+        slot,
+        frames,
+        baseline,
+        object_a=object_a,
+        object_b=object_b,
+        interrupted=interrupted,
+        reference_authorized=authorized,
+    )
+    if snapshot is None or snapshot["recipe_version"] == "1.0.0":
+        return result
+    from .visual_checks import InvalidVisualEvidence, evaluate_visual_controls
+
+    result["verifier_version"] = "counterpart-verifier/2.0.0"
+    result["recipe_snapshot_sha256"] = snapshot["snapshot_sha256"]
+    result["hard_error"] = result["code"] in HARD_ERROR_CODES
+    for check in result["checks"]:
+        check["outcome"] = (
+            "pass" if check["passed"] else "unknown" if result["code"] in UNCERTAIN_CODES else "fail"
+        )
+        if not check["passed"]:
+            check["code"] = result["code"]
+    if authorization_invalid:
+        result["hard_error"] = True
+        result["checks"].append(
+            {
+                "name": "baseline_authorization",
+                "outcome": "fail",
+                "passed": False,
+                "code": "baseline_authorization_invalid",
+                "detail": "The baseline authorization does not match the saved evidence.",
+            }
+        )
+    if authorized:
+        result["human_review_required"] = True
+        result["baseline_authorization_id"] = baseline_authorization["id"]
+    # Validate every record, including records hidden behind a prior uncertain
+    # role. Empty role selection checks only structural integrity.
+    if not result["hard_error"]:
+        try:
+            _parse_frames(frames, ())
+            if baseline is not None:
+                _parse_frames(baseline.get("frames"), ())
+        except _Rejected as error:
+            result["hard_error"] = True
+            result["checks"].append(
+                {
+                    "name": "evidence_structure",
+                    "outcome": "fail",
+                    "passed": False,
+                    "code": error.code,
+                    "detail": error.message,
+                }
+            )
+    if not result["hard_error"]:
+        result["checks"].extend(_independent_geometry(recipe, slot, frames, baseline, (object_a, object_b)))
+        if media_reader is None:
+            result["checks"].append(
+                {
+                    "name": "original_visual_evidence",
+                    "outcome": "unknown",
+                    "passed": False,
+                    "code": "visual_evidence_unavailable",
+                    "detail": "Original images are required for visual verification.",
+                }
+            )
+        else:
+            try:
+                visual = evaluate_visual_controls(
+                    frames,
+                    baseline.get("frames") if baseline else None,
+                    object_a=object_a,
+                    object_b=object_b,
+                    protected_objects=snapshot["protected_objects"],
+                    media_reader=media_reader,
+                )
+                result["checks"].extend(visual["checks"])
+                result["evidence"]["visual"] = visual["evidence"]
+            except InvalidVisualEvidence:
+                result["hard_error"] = True
+                result["checks"].append(
+                    {
+                        "name": "original_visual_evidence",
+                        "outcome": "fail",
+                        "passed": False,
+                        "code": "invalid_evidence",
+                        "detail": "Original image bytes do not match their evidence record.",
+                    }
+                )
+    outcomes = {check["outcome"] for check in result["checks"]}
+    result["hard_error"] = result["hard_error"] or any(
+        check["outcome"] == "fail" and check.get("code") in HARD_ERROR_CODES for check in result["checks"]
+    )
+    result["outcome"] = "fail" if "fail" in outcomes else "unknown" if "unknown" in outcomes else "pass"
+    result["accepted"] = result["outcome"] == "pass"
+    result["evidence"]["can_complete_pair"] = result["accepted"] and slot == "counterpart"
+    result["evidence"]["limitations"].extend(snapshot["limitations"][len(LIMITATIONS) :])
+    if not result["accepted"]:
+        reason = next(c for c in result["checks"] if c["outcome"] == result["outcome"])
+        result["code"] = reason.get("code", result["code"])
+        result["message"] = reason["detail"]
+    return result

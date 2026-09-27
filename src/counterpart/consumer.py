@@ -24,10 +24,12 @@ from typing import BinaryIO
 from uuid import UUID
 
 from .dataset import examples as pair_examples
+from .evidence_revisions import HUMAN_BASIS, evaluate, validate_adjudication
+from .execution_contract import assert_observation_matches, validate_execution_contract
 from .recipes import RecipeContractError, assert_runtime_compatible, validate_recipe_snapshot
-from .splits import split_for_session
+from .repository import Conflict
+from .splits import split_for_session, validate_split_group
 from .storage import InvalidImage, inspect_image
-from .verification import verify
 
 _ASSET = re.compile(r"assets/([0-9a-f]{64})\Z")
 _REVIEW_BASIS = (
@@ -206,6 +208,7 @@ class PortableRelease:
                 _require(actual == expected, "An asset differs from its declared hash, size, or dimensions.")
         except (
             ArchiveValidationError,
+            Conflict,
             OSError,
             ValueError,
             KeyError,
@@ -278,7 +281,10 @@ class PortableRelease:
         manifest = self._manifest
         schema = manifest.get("schema_version")
         self._release = schema == "counterpart.dataset.v1"
-        _require(self._release or schema == "counterpart.pair.v1", "Unsupported manifest schema version.")
+        _require(
+            self._release or schema in {"counterpart.pair.v1", "counterpart.pair.v2"},
+            "Unsupported manifest schema version.",
+        )
         if self._release:
             required = {
                 "id",
@@ -366,7 +372,9 @@ class PortableRelease:
                         human_reviewed=True,
                         review=member["review"],
                         release_id=manifest["id"],
-                        label_basis=_REVIEW_BASIS,
+                        label_basis=HUMAN_BASIS
+                        if pair["schema_version"] == "counterpart.pair.v2"
+                        else _REVIEW_BASIS,
                     )
                 self._rows.append(row)
         if self._release:
@@ -394,9 +402,11 @@ class PortableRelease:
 
     def _validate_pair(self, pair: object, kind: str) -> None:
         _require(
-            isinstance(pair, dict) and pair.get("schema_version") == "counterpart.pair.v1",
+            isinstance(pair, dict)
+            and pair.get("schema_version") in {"counterpart.pair.v1", "counterpart.pair.v2"},
             "Invalid pair schema.",
         )
+        human = pair["schema_version"] == "counterpart.pair.v2"
         try:
             snapshot = validate_recipe_snapshot(pair.get("recipe_snapshot"))
             assert_runtime_compatible(snapshot)
@@ -404,34 +414,36 @@ class PortableRelease:
             raise ArchiveValidationError(
                 "Missing, altered, or unsupported frozen recipe; legacy exports are unsupported."
             ) from None
-        _require(
-            set(pair)
-            == {
-                "schema_version",
-                "pair_id",
-                "session_id",
-                "recipe",
-                "mode",
-                "revision",
-                "objects",
-                "recipe_snapshot",
-                "campaign_id",
-                "split_group",
-                "split",
-                "baseline",
-                "counterpart",
-                "provenance",
-            },
-            "Pair fields do not match its schema.",
-        )
+        required = {
+            "schema_version",
+            "pair_id",
+            "session_id",
+            "recipe",
+            "mode",
+            "revision",
+            "objects",
+            "recipe_snapshot",
+            "campaign_id",
+            "split_group",
+            "split",
+            "baseline",
+            "counterpart",
+            "provenance",
+        }
+        optional = {"execution_contract", "split_provenance", "baseline_authorization"}
+        if human:
+            required.add("evidence_adjudication")
+        _require(required <= set(pair) <= required | optional, "Pair fields do not match its schema.")
         _require(_uuid(pair.get("pair_id")) and _uuid(pair.get("session_id")), "Pair identity is invalid.")
         _require(
             pair.get("campaign_id") is None or _uuid(pair["campaign_id"]),
             "Pair campaign identity is invalid.",
         )
+        group = pair["session_id"]
+        if pair.get("split_provenance") is not None:
+            group = validate_split_group(pair["split_provenance"], pair["session_id"])["id"]
         _require(
-            pair.get("split_group") == pair["session_id"]
-            and pair.get("split") == split_for_session(pair["session_id"]),
+            pair.get("split_group") == group and pair.get("split") == split_for_session(group),
             "Pair split does not match its stable collection session group.",
         )
         _require(_integer(pair.get("revision"), 1), "Pair revision is invalid.")
@@ -444,27 +456,36 @@ class PortableRelease:
         _require(
             isinstance(provenance, dict)
             and provenance.get("evidence_kind") == kind
-            and provenance.get("human_reviewed") is False
+            and provenance.get("human_reviewed") is human
             and provenance.get("legacy_recipe_snapshot_missing") is False
             and pair.get("mode") == ("replay" if kind == "fixture_replay" else "live"),
             "Pair provenance is inconsistent with the release or immutable machine evidence.",
         )
+        if human:
+            _require(
+                provenance.get("label_origin") == "human_adjudication",
+                "Human-derived labels must declare their separate origin.",
+            )
+        execution = pair.get("execution_contract")
+        if execution is not None:
+            execution = validate_execution_contract(execution, mode=pair["mode"])
         baseline = None
         for slot in ("baseline", "counterpart"):
             capture = pair.get(slot)
             _require(
                 isinstance(capture, dict)
                 and _uuid(capture.get("id"))
-                and capture.get("slot") == slot
-                and capture.get("status") == "accepted"
+                and capture.get("slot") in ({"baseline", "counterpart"} if human else {slot})
+                and capture.get("status")
+                in ({"accepted", "rejected", "superseded"} if human else {"accepted"})
                 and capture.get("interrupted") is False
                 and capture.get("error") is None
                 and _integer(capture.get("revision"), 1)
                 and capture["revision"] <= pair["revision"],
-                "Pair must contain two accepted, uninterrupted captures with valid revisions.",
+                "Pair must contain two complete uninterrupted observations with valid revisions.",
             )
             _require(
-                set(capture)
+                set(capture) - {"baseline_authorization", "human_review_required", "recovery_unresolved"}
                 == {
                     "id",
                     "slot",
@@ -488,36 +509,57 @@ class PortableRelease:
                 and (capture["retry_of_capture_id"] is None or _uuid(capture["retry_of_capture_id"])),
                 "Capture fields or recorded metadata do not match its schema.",
             )
-            if slot == "baseline":
+            if capture["slot"] == "baseline":
                 _require(
                     capture.get("reference_capture_id") is None,
                     "Baseline unexpectedly references another capture.",
                 )
             else:
                 _require(
-                    capture.get("reference_capture_id") == pair["baseline"]["id"]
-                    and capture["revision"] == pair["revision"]
-                    and pair["baseline"]["revision"] < capture["revision"],
-                    "Counterpart does not refer to the accepted baseline and current pair revision.",
+                    capture.get("reference_capture_id") == pair["baseline"]["id"],
+                    "Original counterpart refers to a different reference.",
+                )
+            if slot == "counterpart":
+                _require(
+                    pair["baseline"]["revision"] < capture["revision"]
+                    and (human or capture["revision"] == pair["revision"]),
+                    "Counterpart does not match the ordered pair revision.",
+                )
+            _require(
+                capture.get("human_review_required", False)
+                is (capture.get("baseline_authorization") is not None),
+                "Capture human-review requirement differs from its saved authorization.",
+            )
+            _require(
+                "recovery_unresolved" not in capture or capture["recovery_unresolved"] is True,
+                "Capture recovery provenance must retain an explicit unresolved flag.",
+            )
+            if not human:
+                _require(
+                    capture.get("baseline_authorization") is None and not capture.get("recovery_unresolved"),
+                    "Human-authorized evidence cannot impersonate an ordinary machine pair.",
                 )
             frames = capture.get("frames")
             _require(isinstance(frames, list) and 1 <= len(frames) <= 48, "Capture frame count is invalid.")
             for frame in frames:
                 self._validate_frame(frame, kind)
-            result = verify(
-                pair["recipe"],
-                slot,
-                frames,
-                baseline,
-                object_a=snapshot["object_a"],
-                object_b=snapshot["object_b"],
+                if execution is not None:
+                    assert_observation_matches(frame, execution, pair["mode"])
+            result = evaluate(
+                capture,
+                snapshot,
+                baseline if capture["slot"] == "counterpart" else None,
+                media_reader=lambda asset: self._read(f"assets/{asset}", self.limits.max_asset_bytes),
             )
             _require(
-                result["accepted"] is True and _canonical(result) == _canonical(capture.get("result")),
+                (human or result["accepted"] is True)
+                and _canonical(result) == _canonical(capture.get("result")),
                 "Recorded decision or answer differs from deterministic verification of its observations.",
             )
             if slot == "baseline":
                 baseline = {**result, "frames": frames}
+        if human:
+            validate_adjudication(pair, replay_decisions=False)
 
     def _validate_frame(self, frame: object, kind: str) -> None:
         _require(isinstance(frame, dict), "Capture frame must be an object.")
@@ -578,7 +620,13 @@ class PortableRelease:
             "id": self._manifest.get("id", self._manifest.get("pair_id")),
             "content_sha256": self._manifest.get("content_sha256"),
             "evidence_kind": self.evidence_kind,
-            "human_reviewed": self._release,
+            "human_reviewed": self._release
+            or any(row.get("label_origin") == "human_adjudication" for row in self._rows),
+            "release_reviewed": self._release,
+            "human_adjudicated_pairs": sum(
+                row.get("label_origin") == "human_adjudication" for row in self._rows
+            )
+            // 2,
             "pair_count": len(self._rows) // 2,
             "example_count": len(self._rows),
             "asset_count": len(self._assets),

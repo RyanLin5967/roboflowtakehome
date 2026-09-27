@@ -5,12 +5,13 @@ export type Mode = 'live' | 'replay';
 export type Slot = 'baseline' | 'counterpart' | 'recovery' | 'preview';
 export type Scenario = 'baseline' | 'counterpart' | 'wrong_relation' | 'camera_moved' | 'ambiguous' | 'recovery';
 export type Frame = { asset_id: string; t_ms: number; width: number; height: number; detections?: Array<{ label: string; confidence: number; box: [number, number, number, number] }>; model?: { provider?: string; model_id?: string } };
-export type Check = { name: string; passed: boolean; detail?: string };
-export type Result = { accepted: boolean; code: string; message: string; checks: Check[]; evidence: Record<string, unknown>; verifier_version: string };
+export type Check = { name: string; passed: boolean; detail?: string; outcome?: 'pass' | 'fail' | 'unknown'; code?: string; measurements?: Record<string, unknown> };
+export type Result = { outcome?: 'pass' | 'fail' | 'unknown'; hard_error?: boolean; accepted: boolean; code: string; message: string; checks: Check[]; evidence: Record<string, unknown>; verifier_version: string };
 export type Capture = { id: string; slot: Slot; status: string; revision: number; epoch: number; created_at: string; frames: Frame[]; result: Result | null; error: string | null; progress?: { completed_frames: number; total_frames: number } };
 export type Session = {
   id: string; recipe: Recipe; mode: Mode; object_a: string; object_b: string;
   revision: number; epoch: number; state: 'collecting' | 'baseline_ready' | 'ready' | 'published';
+  human_review_required?: boolean; baseline_authorization?: Record<string, unknown> | null;
   recovery_required: boolean; baseline: Capture | null; counterpart: Capture | null;
   latest_capture: Capture | null; feedback: Capture | Result | null;
   pair: Record<string, unknown> | null; events: Array<Record<string, unknown>>;

@@ -105,7 +105,7 @@ def test_unknown_recipes_do_not_fall_back(recipe):
         build_recipe_snapshot(recipe)
 
 
-@pytest.mark.parametrize("version", [None, "", "latest", "1", "1.0", "0.9.0", "2.0.0", 1, True, {}])
+@pytest.mark.parametrize("version", [None, "", "latest", "1", "1.0", "0.9.0", "3.0.0", 1, True, {}])
 def test_unknown_versions_do_not_fall_back(version):
     with pytest.raises(RecipeContractError):
         build_recipe_snapshot("spatial", recipe_version=version)
@@ -231,7 +231,7 @@ def test_catalogue_is_exactly_the_supported_executable_versions():
     for entry in catalogue:
         assert entry["requires_distinct_classes"]
         assert entry["supported_objects"] == list(SUPPORTED_OBJECTS)
-        assert entry["defaults"] == {"object_a": "bottle", "object_b": "cup"}
+        assert entry["defaults"] == {"object_a": "bottle", "object_b": "cup", "protected_objects": []}
         assert_runtime_compatible(entry["snapshot"])
     catalogue[0]["supported_objects"].append("dragon")
     catalogue[0]["snapshot"]["verifier"]["thresholds"].clear()

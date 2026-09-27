@@ -23,7 +23,16 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from .splits import split_for_session
+from .execution_contract import (
+    ExecutionContractError,
+    assert_execution_matches,
+    assert_observation_matches,
+    build_execution_contract,
+    canonical,
+    normalize_legacy_configuration,
+    validate_execution_contract,
+)
+from .splits import manifest_split, session_split_group, validate_split_group
 
 MAX_ATTEMPTS = 3
 MAX_PENDING_JOBS = 128
@@ -82,6 +91,9 @@ class Repository:
             connection.execute("SELECT pg_advisory_xact_lock(780245190220)")
             connection.execute(Path(__file__).with_name("schema.sql").read_text())
             connection.execute(Path(__file__).with_name("collection_schema.sql").read_text())
+            # Independent feature schemas follow their session/collection dependencies.
+            for filename in ("evidence_schema.sql", "delivery_schema.sql"):
+                connection.execute(Path(__file__).with_name(filename).read_text())
 
     @staticmethod
     def _session(connection, session_id: str, *, lock: bool = False) -> dict:
@@ -130,6 +142,12 @@ class Repository:
                 "result": row["result"],
                 "error": row["error"],
                 "interrupted": row["interrupted"],
+                **(
+                    {"baseline_authorization": row["baseline_authorization"], "human_review_required": True}
+                    if row["baseline_authorization"] is not None
+                    else {}
+                ),
+                **({"recovery_unresolved": True} if row["recovery_unresolved"] else {}),
             }
         )
 
@@ -150,8 +168,12 @@ class Repository:
                 "created_at",
                 "recipe_snapshot",
                 "campaign_id",
+                "execution_contract",
+                "split_group_snapshot",
+                "baseline_authorization",
             )
         }
+        result["human_review_required"] = row["baseline_authorization"] is not None
         for field, key in (
             ("baseline", "baseline_id"),
             ("counterpart", "counterpart_id"),
@@ -195,18 +217,32 @@ class Repository:
         object_b: str,
         *,
         recipe_snapshot: dict | None = None,
+        execution_contract: dict | None = None,
+        split_group_snapshot: dict | None = None,
+        protected_objects: list[str] | None = None,
         campaign_id: str | None = None,
         session_id: str | None = None,
         token: str | None = None,
     ) -> dict:
         """Create on a caller-owned transaction so quota admission is atomic."""
-        from .recipes import RecipeContractError, build_recipe_snapshot, validate_recipe_snapshot
+        from .recipes import (
+            RecipeContractError,
+            build_recipe_snapshot,
+            validate_recipe_snapshot,
+            version_for_mode,
+        )
 
         if recipe not in {"spatial", "temporal"} or mode not in {"live", "replay"}:
             raise Conflict("invalid_session", "Unsupported recipe or collection mode")
         try:
             frozen = (
-                build_recipe_snapshot(recipe, object_a, object_b)
+                build_recipe_snapshot(
+                    recipe,
+                    object_a,
+                    object_b,
+                    recipe_version=version_for_mode(mode),
+                    protected_objects=protected_objects,
+                )
                 if recipe_snapshot is None
                 else validate_recipe_snapshot(recipe_snapshot)
             )
@@ -216,18 +252,202 @@ class Repository:
             raise Conflict("recipe_mismatch", "Frozen recipe does not match this session")
         session_id, token = session_id or str(uuid4()), token or secrets.token_urlsafe(32)
         digest = hashlib.sha256(token.encode()).hexdigest()
+        try:
+            split_group = validate_split_group(
+                split_group_snapshot or session_split_group(session_id), session_id
+            )
+        except ValueError as error:
+            raise Conflict("invalid_split_group", str(error)) from error
+        try:
+            execution = (
+                build_execution_contract(mode=mode)
+                if execution_contract is None
+                else validate_execution_contract(execution_contract, mode=mode)
+            )
+        except ExecutionContractError as error:
+            raise Conflict(error.code, str(error)) from error
         connection.execute(
             "INSERT INTO counterpart_sessions "
-            "(id, capability_hash, recipe, mode, object_a, object_b,recipe_snapshot,campaign_id) "
-            "VALUES (%s, %s, %s, %s, %s, %s,%s,%s)",
-            (session_id, digest, recipe, mode, object_a, object_b, Jsonb(frozen), campaign_id),
+            "(id, capability_hash, recipe, mode, object_a, object_b,recipe_snapshot,"
+            "campaign_id,execution_contract,"
+            "split_group_snapshot) VALUES (%s, %s, %s, %s, %s, %s,%s,%s,%s,%s)",
+            (
+                session_id,
+                digest,
+                recipe,
+                mode,
+                object_a,
+                object_b,
+                Jsonb(frozen),
+                campaign_id,
+                Jsonb(execution),
+                Jsonb(split_group),
+            ),
         )
         self._event(connection, session_id, "session_created", mode=mode, campaign_id=campaign_id)
         return {"token": token, "session": self._snapshot(connection, session_id)}
 
-    def create_session(self, recipe: str, mode: str, object_a: str, object_b: str) -> dict:
+    def create_session(
+        self,
+        recipe: str,
+        mode: str,
+        object_a: str,
+        object_b: str,
+        *,
+        execution_contract: dict | None = None,
+        protected_objects: list[str] | None = None,
+    ) -> dict:
         with self._connection() as connection:
-            return self._create_session(connection, recipe, mode, object_a, object_b)
+            return self._create_session(
+                connection,
+                recipe,
+                mode,
+                object_a,
+                object_b,
+                execution_contract=execution_contract,
+                protected_objects=protected_objects,
+            )
+
+    def assert_execution_contract(self, session_id: str, configuration: dict) -> dict:
+        """Refuse a changed worker before it enters inference or spends a reservation."""
+        with self._connection() as connection:
+            session = self._session(connection, session_id)
+            if session["execution_contract"] is None:
+                raise ExecutionContractError(
+                    "execution_contract_migration_required",
+                    "Historical collection requires explicit, evidence-backed model migration",
+                )
+            frozen = assert_execution_matches(session["execution_contract"], configuration)
+            for capture_id in (session["baseline_id"], session["counterpart_id"]):
+                if capture_id is None:
+                    continue
+                capture = self._capture(connection, capture_id, internal=True)
+                for frame in capture["frames"]:
+                    self._assert_observation_contract(frame, frozen, session["mode"])
+            return frozen
+
+    @staticmethod
+    def _assert_observation_contract(frame: dict, contract: dict, mode: str) -> None:
+        assert_observation_matches(frame, contract, mode)
+
+    def migrate_execution_contract(
+        self,
+        session_id: str,
+        *,
+        expected_revision: int,
+        reviewer: str,
+        reason: str,
+        execution_contract: dict | None = None,
+    ) -> dict:
+        """Explicit one-time legacy adoption, never reinterpret saved observations.
+
+        Existing observations must establish one complete canonical configuration.
+        An operator-supplied contract is permitted for untouched sessions only, or
+        must exactly match all recorded evidence. Every adoption is audited.
+        """
+        if not isinstance(reviewer, str) or not 1 <= len(reviewer.strip()) <= 120:
+            raise Conflict("invalid_migration", "Migration needs a named operator")
+        if not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 1000:
+            raise Conflict("invalid_migration", "Migration needs a recorded reason")
+        with self._connection() as connection:
+            session = self._session(connection, session_id, lock=True)
+            if session["revision"] != expected_revision:
+                raise Conflict("stale_revision", "Reload the session before model migration")
+            if session["execution_contract"] is not None:
+                if execution_contract is None or canonical(session["execution_contract"]) == canonical(
+                    execution_contract
+                ):
+                    return self._snapshot(connection, session_id)
+                raise Conflict("execution_contract_frozen", "A saved model contract cannot be changed")
+            busy = connection.execute(
+                "SELECT 1 FROM counterpart_jobs WHERE session_id=%s "
+                "AND status='running' AND lease_expires_at>clock_timestamp() LIMIT 1",
+                (session_id,),
+            ).fetchone()
+            if busy:
+                raise Conflict("migration_busy", "Wait for running capture work before model migration")
+            rows = connection.execute(
+                "SELECT observed_frames FROM counterpart_captures WHERE session_id=%s "
+                "AND observed_frames IS NOT NULL",
+                (session_id,),
+            ).fetchall()
+            observed = [frame for row in rows for frame in row["observed_frames"]]
+            configurations = []
+            cache_exists = connection.execute(
+                "SELECT to_regclass('counterpart_inference_cache') IS NOT NULL AS exists"
+            ).fetchone()["exists"]
+            for frame in observed:
+                if session["mode"] == "replay":
+                    configurations.append(build_execution_contract(mode="replay")["configuration"])
+                    continue
+                provenance = frame.get("inference", {})
+                configuration = provenance.get("configuration")
+                if configuration is None and cache_exists:
+                    cache = connection.execute(
+                        "SELECT model_config FROM counterpart_inference_cache "
+                        "WHERE cache_key=%s AND asset_id=%s AND status='succeeded'",
+                        (provenance.get("cache_key"), frame.get("asset_id")),
+                    ).fetchone()
+                    configuration = cache["model_config"] if cache else None
+                if configuration is None:
+                    raise Conflict(
+                        "legacy_model_unknown",
+                        "Saved evidence cannot establish the original detector configuration",
+                    )
+                configurations.append(configuration)
+            # Include completed frame calls not yet committed by a crashed worker.
+            if cache_exists:
+                configurations.extend(
+                    row["model_config"]
+                    for row in connection.execute(
+                        "SELECT DISTINCT c.model_config FROM counterpart_inference_attempts a "
+                        "JOIN counterpart_inference_cache c ON c.cache_key=a.cache_key "
+                        "WHERE a.session_id=%s AND a.status='succeeded'",
+                        (session_id,),
+                    ).fetchall()
+                )
+            try:
+                candidate = (
+                    validate_execution_contract(execution_contract, mode=session["mode"])
+                    if execution_contract is not None
+                    else None
+                )
+                for configuration in configurations:
+                    evidence_contract = build_execution_contract(
+                        mode=session["mode"],
+                        detector_configuration=normalize_legacy_configuration(configuration),
+                    )
+                    if candidate is None:
+                        candidate = evidence_contract
+                    elif candidate != evidence_contract:
+                        raise ExecutionContractError(
+                            "legacy_model_conflict",
+                            "Historical observations use different detector configurations",
+                        )
+                if candidate is None:
+                    raise ExecutionContractError(
+                        "legacy_model_unknown", "An untouched legacy session needs an explicit model contract"
+                    )
+                for frame in observed:
+                    self._assert_observation_contract(frame, candidate, session["mode"])
+            except ExecutionContractError as error:
+                raise Conflict(error.code, str(error)) from error
+            connection.execute(
+                "UPDATE counterpart_sessions SET execution_contract=%s WHERE id=%s",
+                (Jsonb(candidate), session_id),
+            )
+            self._event(
+                connection,
+                session_id,
+                "execution_contract_migrated",
+                execution_contract=candidate,
+                reviewer=reviewer.strip(),
+                reason=reason.strip(),
+                observations_checked=len(observed),
+                source="recorded_observations" if configurations else "explicit_operator_declaration",
+                legacy_endpoint_mapping=any("endpoint" not in item for item in configurations),
+            )
+            return self._snapshot(connection, session_id)
 
     def evaluation_snapshot(self, session_id: str) -> dict:
         """Complete historical evidence; never substitute only the latest attempt."""
@@ -245,6 +465,10 @@ class Repository:
                     "recipe": session["recipe"],
                     "mode": session["mode"],
                     "recipe_snapshot": session["recipe_snapshot"],
+                    "execution_contract": session["execution_contract"],
+                    "split_group_snapshot": session["split_group_snapshot"],
+                    "baseline_authorization": session["baseline_authorization"],
+                    "human_review_required": session["baseline_authorization"] is not None,
                     "captures_complete": True,
                     "provenance": {
                         "evidence_kind": "fixture_replay"
@@ -354,6 +578,8 @@ class Repository:
         fingerprint: str,
         *,
         saved_epoch: int | None = None,
+        saved_baseline_authorization: dict | None = None,
+        saved_recovery_unresolved: bool = False,
     ) -> dict:
         session = self._session(connection, session_id, lock=True)
         previous = connection.execute(
@@ -388,7 +614,13 @@ class Repository:
         slot = metadata["slot"]
         if slot not in {"baseline", "counterpart", "preview", "recovery"}:
             raise Conflict("invalid_slot", "Unknown capture slot")
-        if slot in COMMITTED_SLOTS and session["recovery_required"] and saved_epoch is None:
+        reviewed_collection = slot == "counterpart" and session["baseline_authorization"] is not None
+        if (
+            slot in COMMITTED_SLOTS
+            and session["recovery_required"]
+            and saved_epoch is None
+            and not reviewed_collection
+        ):
             raise Conflict("recovery_required", "Check the scene again before continuing")
         if slot in {"counterpart", "recovery"} and session["baseline_id"] is None:
             raise Conflict("baseline_required", "Capture an accepted first observation first")
@@ -414,11 +646,21 @@ class Repository:
         elif slot in {"preview", "recovery"}:
             self._supersede(connection, session_id, (slot,), pending_only=slot == "preview")
         capture_id, job_id = str(uuid4()), str(uuid4())
+        baseline_authorization = (
+            (saved_baseline_authorization if saved_epoch is not None else session["baseline_authorization"])
+            if slot != "baseline"
+            else None
+        )
+        recovery_unresolved = (
+            (saved_recovery_unresolved if saved_epoch is not None else session["recovery_required"])
+            if baseline_authorization is not None and slot == "counterpart"
+            else False
+        )
         connection.execute(
             "INSERT INTO counterpart_captures "
             "(id, session_id, idempotency_key, fingerprint, slot, revision, epoch, client_seq, "
-            "frames, interrupted,reference_capture_id) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "frames, interrupted,reference_capture_id,baseline_authorization,recovery_unresolved) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 capture_id,
                 session_id,
@@ -431,6 +673,8 @@ class Repository:
                 Jsonb(frames),
                 metadata.get("interrupted", False),
                 session["baseline_id"] if slot != "baseline" else None,
+                Jsonb(baseline_authorization) if baseline_authorization is not None else None,
+                recovery_unresolved,
             ),
         )
         connection.execute(
@@ -441,7 +685,7 @@ class Repository:
             if slot == "baseline":
                 connection.execute(
                     "UPDATE counterpart_sessions SET revision=%s,latest_capture_id=%s,baseline_id=NULL, "
-                    "counterpart_id=NULL,state='collecting' WHERE id=%s",
+                    "counterpart_id=NULL,baseline_authorization=NULL,state='collecting' WHERE id=%s",
                     (revision, capture_id, session_id),
                 )
             else:
@@ -526,6 +770,8 @@ class Repository:
                 original["frames"],
                 fingerprint,
                 saved_epoch=original["epoch"],
+                saved_baseline_authorization=original["baseline_authorization"],
+                saved_recovery_unresolved=original["recovery_unresolved"],
             )
             connection.execute(
                 "UPDATE counterpart_captures SET retry_of_capture_id=%s WHERE id=%s",
@@ -749,17 +995,19 @@ class Repository:
                 if slot == "baseline":
                     connection.execute(
                         "UPDATE counterpart_sessions SET "
-                        "baseline_id=%s,counterpart_id=NULL,state='baseline_ready', "
+                        "baseline_id=%s,counterpart_id=NULL,baseline_authorization=NULL,"
+                        "state='baseline_ready', "
                         "recovery_required=(recovery_required OR %s) WHERE id=%s",
                         (capture["id"], capture["epoch"] != session["epoch"], session["id"]),
                     )
                 elif slot == "counterpart":
                     connection.execute(
                         "UPDATE counterpart_sessions SET "
-                        "counterpart_id=%s,state='ready',recovery_required=false WHERE id=%s",
-                        (capture["id"], session["id"]),
+                        "counterpart_id=%s,state='ready',recovery_required=CASE WHEN %s "
+                        "THEN recovery_required ELSE false END WHERE id=%s",
+                        (capture["id"], capture["baseline_authorization"] is not None, session["id"]),
                     )
-                elif slot == "recovery":
+                elif slot == "recovery" and capture["baseline_authorization"] is None:
                     connection.execute(
                         "UPDATE counterpart_sessions SET recovery_required=false WHERE id=%s",
                         (session["id"],),
@@ -815,6 +1063,12 @@ class Repository:
                 return _json(existing)
             if expected_revision != session["revision"]:
                 raise Conflict("stale_revision", "Review the current pair before publishing")
+            if session["baseline_authorization"] is not None:
+                raise Conflict(
+                    "human_review_required",
+                    "This baseline was authorized for further collection, not machine acceptance; "
+                    "an operator must review and publish both observations as human-reviewed evidence",
+                )
             if (
                 session["state"] != "ready"
                 or session["baseline_id"] is None
@@ -849,9 +1103,9 @@ class Repository:
                 "revision": session["revision"],
                 "objects": {"a": session["object_a"], "b": session["object_b"]},
                 "recipe_snapshot": session["recipe_snapshot"],
+                "execution_contract": session["execution_contract"],
                 "campaign_id": str(session["campaign_id"]) if session["campaign_id"] else None,
-                "split_group": session_id,
-                "split": split_for_session(session_id),
+                **manifest_split(session),
                 "baseline": self._capture(connection, session["baseline_id"], internal=True),
                 "counterpart": self._capture(connection, session["counterpart_id"], internal=True),
                 "provenance": {

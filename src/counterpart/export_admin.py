@@ -1,8 +1,8 @@
 """Operator inspection and conservative recovery of an explicit export request.
 
 This module makes no provider calls. Upload uncertainty can start another bounded
-read-only reconciliation cycle, preserving its write intent. Annotation ambiguity
-cannot be resolved from the current provider API and is never automatically retried.
+read-only reconciliation cycle, preserving its write intent. Prediction-write ambiguity
+cannot be proved from the image API's ground-truth annotation and is never retried.
 Export authorization is frozen at request time; a later review is not cancellation.
 """
 
@@ -51,6 +51,7 @@ _SAFE_ERRORS = (
         "export_requires_reconciliation",
         "invalid_confirmed_receipt",
         "invalid_export_evidence",
+        "invalid_export_adjudication",
         "invalid_export_manifest",
         "invalid_export_media",
         "invalid_export_receipt_state",

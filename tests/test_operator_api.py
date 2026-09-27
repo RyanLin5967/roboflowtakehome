@@ -255,7 +255,10 @@ def completed_pair(client, repo, worker, invite):
         assert response.status_code == 202, response.text
         assert worker.once()
         session = repo.snapshot(session["id"])
-        assert session["latest_capture"]["status"] == "accepted", session
+        assert session["latest_capture"]["status"] == "accepted", (
+            session["latest_capture"].get("error"),
+            session["latest_capture"].get("result"),
+        )
     response = client.post(
         f"/api/sessions/{session['id']}/publish",
         headers=headers,
@@ -621,12 +624,42 @@ def test_retry_saved_evidence_needs_its_capability_and_never_recaptures_pixels(s
 
 def live_test_environment(system, monkeypatch):
     """Synthetic detector and images exercise live HTTP plumbing without a network model call."""
+    import random
+
+    from PIL import Image, ImageDraw
+
+    from counterpart.execution_contract import build_execution_contract
     from counterpart.fixtures import generate
 
     client, repo, _, app, config = system
     monkeypatch.setenv("ROBOFLOW_API_KEY", "test-only-unused-provider-key")
     config.live_enabled = True
     scenes = {slot: generate("spatial", slot)[0] for slot in ("baseline", "counterpart")}
+    # Real v2 registration requires distributed background texture. Draw the
+    # same deterministic texture in both fixtures, outside every object's box.
+    # The verifier still processes the actual saved image bytes without mocks.
+    boxes = [d["box"] for frame in scenes.values() for d in frame["detections"]]
+    for frame in scenes.values():
+        picture = Image.open(io.BytesIO(frame["bytes"])).convert("RGB")
+        draw = ImageDraw.Draw(picture)
+        rng = random.Random(8027)
+        for x in range(36, frame["width"] - 36, 32):
+            for y in range(94, frame["height"] - 70, 32):
+                if any(
+                    x + 20 > box[0] * frame["width"] - 20
+                    and x < box[2] * frame["width"] + 20
+                    and y + 20 > box[1] * frame["height"] - 20
+                    and y < box[3] * frame["height"] + 20
+                    for box in boxes
+                ):
+                    continue
+                for dx in range(0, 20, 4):
+                    for dy in range(0, 20, 4):
+                        tone = rng.choice((35, 205))
+                        draw.rectangle((x + dx, y + dy, x + dx + 3, y + dy + 3), fill=(tone,) * 3)
+        output = io.BytesIO()
+        picture.save(output, "JPEG", quality=95)
+        frame["bytes"] = output.getvalue()
     observations = {hashlib.sha256(frame["bytes"]).hexdigest(): frame for frame in scenes.values()}
 
     class SyntheticDetector:
@@ -636,10 +669,21 @@ def live_test_environment(system, monkeypatch):
             frame = observations[hashlib.sha256(image).hexdigest()]
             return {
                 "detections": frame["detections"],
-                "model": {"provider": "synthetic-transport-test", "model_id": self.model_id},
+                # Mimic the provider wire identity; this adapter only returns
+                # generated observations and never makes a network request.
+                "model": {"provider": "roboflow", "model_id": self.model_id},
             }
 
-    worker = Worker(repo, app.state.media, config, detector=SyntheticDetector())
+    detector = SyntheticDetector()
+    worker = Worker(repo, app.state.media, config, detector=detector)
+    # Pin the deliberately injected test adapter too; production API pins its
+    # actual Roboflow adapter. Never weaken the worker's identity check for tests.
+    monkeypatch.setattr(
+        "counterpart.operator_api.build_execution_contract",
+        lambda configuration, *, mode: build_execution_contract(
+            configuration, mode=mode, detector=detector if mode == "live" else None
+        ),
+    )
     login(client)
     collection = campaign(client, mode="live")
     invite = invitation(client, collection)
@@ -671,7 +715,10 @@ def completed_live_pair(system, invite, worker, scenes):
         assert submitted.status_code == 202, submitted.text
         assert worker.once()
         session = repo.snapshot(session["id"])
-        assert session["latest_capture"]["status"] == "accepted", session
+        assert session["latest_capture"]["status"] == "accepted", (
+            session["latest_capture"].get("error"),
+            session["latest_capture"].get("result"),
+        )
     published = client.post(
         f"/api/sessions/{session['id']}/publish",
         headers=headers,
@@ -938,3 +985,176 @@ def test_live_disabled_blocks_new_join_but_does_not_hide_an_already_admitted_joi
     recovered = join(client, invite, "recover-this-join-receipt")
     assert recovered.status_code == 201, recovered.text
     assert recovered.json() == first.json()
+
+
+def test_scene_groups_are_operator_owned_and_collectors_cannot_override_assignment(system):
+    client, repo, _, _, _ = system
+    assert client.get("/api/operator/split-groups").status_code == 401
+    assert client.post("/api/operator/split-groups", json={"name": "My scene"}).status_code == 401
+    login(client)
+    created = client.post(
+        "/api/operator/split-groups", json={"name": "Desk by the window", "description": "One physical scene"}
+    )
+    assert created.status_code == 201, created.text
+    group = created.json()
+    assert client.get("/api/operator/split-groups").json()["split_groups"] == [group]
+    collection = campaign(client)
+    invitation = client.post(
+        f"/api/operator/campaigns/{collection['id']}/invites", json={"split_group_id": group["id"]}
+    )
+    assert invitation.status_code == 201, invitation.text
+    invite = invitation.json()
+    assert invite["split_group_id"] == group["id"]
+    client.post("/api/operator/logout")
+    forged = client.post(
+        "/api/invites/sessions",
+        json={"token": invite["token"], "idempotency_key": uuid4().hex, "split_group_id": str(uuid4())},
+    )
+    assert forged.status_code == 422
+    created = join(client, invite)
+    assert created.status_code == 201, created.text
+    saved = created.json()["session"]
+    assert saved["split_group_snapshot"]["id"] == group["id"]
+    assert saved["execution_contract"] == collection["execution_contract"]
+    assert repo.snapshot(saved["id"])["split_group_snapshot"] == saved["split_group_snapshot"]
+    assert client.get("/api/operator/split-groups").status_code == 401
+
+
+def test_scene_group_assignment_rejects_unknown_ids_and_model_contract_cannot_be_client_supplied(system):
+    client, _, _, _, _ = system
+    login(client)
+    collection = campaign(client)
+    missing = client.post(
+        f"/api/operator/campaigns/{collection['id']}/invites", json={"split_group_id": str(uuid4())}
+    )
+    assert missing.status_code == 404
+    forged = client.post(
+        "/api/operator/campaigns", json={"name": "Forged", "mode": "replay", "execution_contract": {}}
+    )
+    assert forged.status_code == 422
+    assert client.get(f"/api/operator/campaigns/{collection['id']}/invites").json()["invites"] == []
+
+
+def test_new_live_campaign_freezes_protected_objects_and_visual_recipe(system, monkeypatch):
+    client, _, _, _, _ = system
+    live_test_environment(system, monkeypatch)
+    response = client.post(
+        "/api/operator/campaigns",
+        json={"name": "Protected desk", "mode": "live", "protected_objects": ["book", "mouse"]},
+    )
+    assert response.status_code == 201, response.text
+    created = response.json()
+    snapshot = created["recipe_snapshot"]
+    assert snapshot["recipe_version"] == "2.0.0"
+    assert snapshot["protected_objects"] == ["book", "mouse"]
+    joined = join(client, invitation(client, created)).json()["session"]
+    assert joined["recipe_snapshot"] == snapshot
+    forged = client.post(
+        "/api/operator/campaigns",
+        json={"name": "Invalid protected role", "mode": "live", "protected_objects": ["bottle"]},
+    )
+    assert forged.status_code == 422
+    replay = client.post(
+        "/api/operator/campaigns",
+        json={"name": "Unsupported replay controls", "mode": "replay", "protected_objects": ["book"]},
+    )
+    assert replay.status_code == 422
+
+
+def legacy_session(repo):
+    """Insert precisely the historical NULL contract state; do not bypass a frozen pin."""
+    from psycopg.types.json import Jsonb
+
+    from counterpart.recipes import build_recipe_snapshot
+
+    identifier = str(uuid4())
+    with repo._connection() as connection:
+        connection.execute(
+            "INSERT INTO counterpart_sessions "
+            "(id,capability_hash,recipe,mode,object_a,object_b,recipe_snapshot) "
+            "VALUES (%s,'unused-test-capability','spatial','live','bottle','cup',%s)",
+            (identifier, Jsonb(build_recipe_snapshot("spatial"))),
+        )
+    return repo.snapshot(identifier)
+
+
+def test_execution_migration_requires_operator_and_refuses_unknown_historical_model(system):
+    client, repo, _, _, _ = system
+    saved = legacy_session(repo)
+    url = f"/api/operator/sessions/{saved['id']}/execution-contract/migrate"
+    body = {"expected_revision": 0, "reason": "Try deriving the original configuration"}
+    assert client.post(url, json=body).status_code == 401
+    login(client)
+    missing = client.post(url, json=body)
+    assert missing.status_code == 409, missing.text
+    assert missing.json()["detail"]["code"] == "legacy_model_unknown"
+    assert repo.snapshot(saved["id"])["execution_contract"] is None
+    assert not any(
+        event["kind"] == "execution_contract_migrated" for event in repo.snapshot(saved["id"])["events"]
+    )
+    assert client.post(url, json={**body, "execution_contract": {}}).status_code == 422
+    assert client.post(url, json={**body, "expected_revision": True}).status_code == 422
+    assert client.post(url, json={**body, "reason": ""}).status_code == 422
+
+
+def test_execution_migration_existing_pin_is_idempotent_and_stale_revision_refused(system):
+    client, repo, _, _, _ = system
+    login(client)
+    saved = join(client, invitation(client, campaign(client))).json()["session"]
+    url = f"/api/operator/sessions/{saved['id']}/execution-contract/migrate"
+    body = {"expected_revision": saved["revision"], "reason": "Check the already pinned model"}
+    first = client.post(url, json=body)
+    assert first.status_code == 200, first.text
+    assert first.json()["execution_contract"] == saved["execution_contract"]
+    assert client.post(url, json=body).json() == first.json()
+    stale = client.post(url, json={**body, "expected_revision": saved["revision"] + 1})
+    assert stale.status_code == 409 and stale.json()["detail"]["code"] == "stale_revision"
+    assert not any(
+        event["kind"] == "execution_contract_migrated" for event in repo.snapshot(saved["id"])["events"]
+    )
+
+
+def test_execution_migration_derives_recorded_proof_and_preserves_observations(system):
+    from counterpart.execution_contract import build_execution_contract
+
+    client, repo, _, _, config = system
+    saved = legacy_session(repo)
+    recorded = build_execution_contract(config)
+    source = {
+        "asset_id": hashlib.sha256(b"generated-test-evidence").hexdigest(),
+        "width": 640,
+        "height": 480,
+        "t_ms": 0,
+    }
+    repo.submit(
+        saved["id"],
+        {"slot": "baseline", "expected_revision": 0, "epoch": 0, "idempotency_key": uuid4().hex},
+        [source],
+        uuid4().hex,
+    )
+    job = repo.claim("generated-history-no-model-call")
+    observed = {
+        **source,
+        "detections": [],
+        "model": {"provider": "roboflow", "model_id": "coco/39"},
+        "inference": {"configuration": recorded["configuration"], "configuration_digest": recorded["digest"]},
+    }
+    repo.finish(job["id"], job["lease_token"], {"accepted": True, "checks": [], "evidence": {}}, [observed])
+    before = repo.evaluation_snapshot(saved["id"])
+    current = repo.snapshot(saved["id"])
+    config.roboflow_model = "coco/40"
+    login(client)
+    url = f"/api/operator/sessions/{saved['id']}/execution-contract/migrate"
+    body = {"expected_revision": current["revision"], "reason": "Recover the model from saved evidence"}
+    migrated = client.post(url, json=body)
+    assert migrated.status_code == 200, migrated.text
+    assert migrated.json()["execution_contract"] == recorded
+    assert migrated.json()["execution_contract"] != build_execution_contract(config)
+    assert client.post(url, json=body).json() == migrated.json()
+    after = repo.evaluation_snapshot(saved["id"])
+    assert before["captures"] == after["captures"] and before["pairs"] == after["pairs"]
+    events = [event for event in migrated.json()["events"] if event["kind"] == "execution_contract_migrated"]
+    assert len(events) == 1
+    assert events[0]["data"]["reviewer"] == "workspace-operator"
+    assert events[0]["data"]["reason"] == body["reason"]
+    assert events[0]["data"]["source"] == "recorded_observations"

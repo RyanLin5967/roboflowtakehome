@@ -246,3 +246,75 @@ as a routine restart: it destroys evidence and the spending ledger.
 Targeted Exa search was also used to find/verify the AWS primary documentation.
 No third-party application source was copied; package/source licenses remain with
 their respective projects.
+
+## Executed HTTPS and expanded-runtime rehearsal
+
+The expanded build passed an additional actual Linux/arm64 container gate on
+2026-09-27 UTC. Its source fingerprint, image identity, checks and cleanup receipt
+are in [gap_deployment_probe.json](../research/gap_deployment_probe.json). The
+[earlier successful rehearsal](../research/gap_deployment_probe.initial.json)
+remains recorded separately, before the saved-comparison explanation was improved.
+These are runtime and deterministic-fixture results, not model-accuracy results.
+
+The new `counterpart-gap-test` Colima profile was capped at two CPUs, 2 GiB RAM,
+an 8 GiB data disk and 6 GiB root disk. It used no host mounts, SSH forwarding,
+user VM template, Kubernetes or Docker context activation. The existing stopped
+`dbprobe` profile and native application were preserved. The frozen image was
+built from lockfiles, and PostgreSQL, API, worker and the actual Caddy reverse
+proxy ran together. All nine added grouping, evidence and delivery tables were
+present in the initialized database.
+
+The private test proxy exposed only loopback port 18443. Python explicitly
+validated the generated certificate and `counterpart.test` server name while
+connecting to loopback. Chromium resolved that reserved test hostname to loopback
+and trusted only the ephemeral certificate's public-key fingerprint in that
+browser process. General certificate-error suppression was disabled and the host
+OS trust store was unchanged. The disposable Caddy container's internal trust
+state stayed inside the removed VM; it was not a host trust installation.
+
+Executed HTTPS checks included anonymous operator refusal, secure HttpOnly
+SameSite=Strict operator cookies, rejected foreign-origin login, security headers,
+collector admission and capability separation, collection/review/release, worker
+SIGKILL, durable queued work, complete service restart, original image hashes and
+immutable release readback. The runtime imported OpenCV 4.13.0 and NumPy 2.5.3,
+executed the version-2 visual checks on saved fixture evidence, and confirmed
+single-thread OpenCV configuration. The fixture baseline's registration became
+uncertain under version 2. Its exact decisions remained unchanged; the appended
+comparison explicitly reported that the counterpart check was blocked by the
+uncertain revised reference. The revision survived service restart without
+rewriting the capture or previously released dataset.
+
+Actual Chromium at 390 × 844 opened the compiled application over the non-localhost
+HTTPS origin, downloaded the 71,919-byte fixture release, inspected the real saved
+comparison history and expanded the revised baseline checks. It displayed the
+uncertainty explanation without page errors or horizontal overflow. Native
+`getUserMedia` returned a synthetic 640 × 480 video track under the page's camera
+permission policy. This establishes HTTPS/browser media plumbing; it does not
+exercise a physical camera or validate detector quality. Live inference and
+external export were disabled, provider credentials were absent, and the
+inference dispatch ledger stayed empty.
+
+The dedicated containers, volumes, VM, certificate keys and temporary tools were
+removed. The Docker context and pre-existing profiles were unchanged, and the
+native application still returned HTTP 200 on port 8080.
+
+Reproduction is deliberately scoped to Apple Silicon with Colima, Docker and the
+repository's development dependencies/browser already installed. Use a fresh
+private directory outside the checkout, a stable source tree, and no existing
+`counterpart-gap-test` profile. The existing native application on port 8080 is
+checked separately during cleanup. The harness downloads SHA-verified official
+Compose and Buildx tools into its private directory and never prints credentials:
+
+```sh
+uv run python deploy/gap_probe.py prepare --directory /tmp/counterpart-https-rehearsal
+uv run python deploy/gap_probe.py start --directory /tmp/counterpart-https-rehearsal
+uv run python deploy/gap_probe.py build --directory /tmp/counterpart-https-rehearsal
+uv run python deploy/gap_probe.py check --directory /tmp/counterpart-https-rehearsal
+uv run python deploy/gap_probe.py cleanup --directory /tmp/counterpart-https-rehearsal
+```
+
+Run cleanup even if the check fails; it targets only the profile bearing that
+run's ownership marker. Its guard regressions cover conflicting profiles,
+unowned directories, missing teardown components and cleanup despite a separate
+native-health failure. Public certificate issuance, public hosting and hosted
+S3-provider compatibility remain distinct external checks.

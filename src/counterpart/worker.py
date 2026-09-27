@@ -8,6 +8,7 @@ import uuid
 import psycopg
 
 from .config import Settings, settings
+from .execution_contract import ExecutionContractError, build_execution_contract
 from .inference_runtime import InferenceRuntime
 from .object_storage import EvidenceStore, MediaUnavailable, create_media_store
 from .recipes import RecipeContractError, assert_runtime_compatible
@@ -48,6 +49,12 @@ class Worker:
             assert_runtime_compatible(snapshot)
             if any(snapshot[key] != session[key] for key in ("recipe", "object_a", "object_b")):
                 raise RecipeContractError("Session roles differ from its frozen recipe.")
+            execution = self.repo.assert_execution_contract(
+                session["id"],
+                self.runtime.model_config
+                if session["mode"] == "live"
+                else build_execution_contract(mode="replay")["configuration"],
+            )
             if session["mode"] == "live":
                 if not self.config.live_enabled or self.inference is None:
                     self.repo.fail(job_id, lease, "live_disabled")
@@ -60,6 +67,7 @@ class Worker:
                     session_id=session["id"],
                     job_key=f"{job_id}:{lease}",
                     heartbeat=lambda: self.repo.heartbeat(job_id, lease),
+                    execution_contract=execution,
                 )
             else:
                 observations = []
@@ -87,6 +95,9 @@ class Worker:
                 baseline,
                 object_a=session["object_a"],
                 object_b=session["object_b"],
+                recipe_snapshot=snapshot,
+                media_reader=self.media.read,
+                baseline_authorization=capture.get("baseline_authorization"),
                 interrupted=capture.get("interrupted", capture.get("metadata", {}).get("interrupted", False)),
             )
             self.repo.finish(job_id, lease, result, observations)
@@ -94,7 +105,9 @@ class Worker:
             # Exception text may contain a provider URL/secret. Persist an allowlisted code only.
             from .providers import ProviderError
 
-            if isinstance(exc, RecipeContractError):
+            if isinstance(exc, ExecutionContractError):
+                self.repo.fail(job_id, lease, exc.code)
+            elif isinstance(exc, RecipeContractError):
                 self.repo.fail(job_id, lease, "unsupported_recipe")
             elif isinstance(exc, psycopg.OperationalError):
                 self.repo.fail(job_id, lease, "database_unavailable", retryable=True)

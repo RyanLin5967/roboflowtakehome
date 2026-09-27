@@ -1,0 +1,558 @@
+{
+  "budget": {
+    "billing_before_billed_usd": 0,
+    "billing_before_metered_usd": 26.61,
+    "build_and_incident_headroom_usd": 0.4479807777777778,
+    "cash_budget_usd": 0,
+    "cpu_core_hour_usd": 0.0473,
+    "cpu_cores_max": 2,
+    "gpu": "L4",
+    "gpu_hour_usd": 0.8,
+    "max_containers": 1,
+    "memory_gib_hour_usd": 0.008,
+    "memory_gib_max": 8,
+    "persistent_volumes": [],
+    "pricing_source": "https://modal.com/pricing",
+    "reservation_usd": 0.8,
+    "retries": 0,
+    "runtime_max_usd": 0.35201922222222226,
+    "spend_limit": "Previously set to $0 by user; current value unavailable in Starter API.",
+    "startup_timeout_seconds": 120,
+    "timeout_seconds": 1200,
+    "user_confirmed_remaining_usd": 3.39
+  },
+  "frozen_at": "2026-09-27T01:52:06.931716+00:00",
+  "limits": [
+    "Public benchmark photographs, not a physical Counterpart capture trial.",
+    "52 photos are new to this diagnostic; six were previously used with hosted inference.",
+    "Pretraining overlap unknown; small single-domain sample cannot establish general accuracy.",
+    "Source relations are ground truth only for left/right, not scene-control validity.",
+    "Visual-check outcomes are descriptive; no invented independent control annotations.",
+    "No training, threshold tuning, persistent volumes, deployed service, or provider keys."
+  ],
+  "model": {
+    "class": "RFDETRSmall",
+    "device": "cuda",
+    "identity_note": "Official RF-DETR Small checkpoint, not claimed byte-identical to hosted coco/39.",
+    "optimization": "none",
+    "package": "rfdetr==1.10.1",
+    "precision": "float32",
+    "threshold": 0.25
+  },
+  "run_id": "counterpart-whatsup-coco58-v1",
+  "schema_version": "counterpart.modal-photo-probe/1",
+  "selected": [
+    {
+      "expected_relation": "left",
+      "filename": "book_left_of_cup.jpeg",
+      "object_a": "book",
+      "object_b": "cup",
+      "source_caption": "A book to the left of a cup",
+      "source_member": "controlled_clevr/book_left_of_cup.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "book_left_of_fork.jpeg",
+      "object_a": "book",
+      "object_b": "fork",
+      "source_caption": "A book to the left of a fork",
+      "source_member": "controlled_clevr/book_left_of_fork.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "book_left_of_knife.jpeg",
+      "object_a": "book",
+      "object_b": "knife",
+      "source_caption": "A book to the left of a knife",
+      "source_member": "controlled_clevr/book_left_of_knife.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "book_left_of_remote.jpeg",
+      "object_a": "book",
+      "object_b": "remote",
+      "source_caption": "A book to the left of a remote",
+      "source_member": "controlled_clevr/book_left_of_remote.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "book_left_of_scissors.jpeg",
+      "object_a": "book",
+      "object_b": "scissors",
+      "source_caption": "A book to the left of a scissors",
+      "source_member": "controlled_clevr/book_left_of_scissors.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "book_left_of_spoon.jpeg",
+      "object_a": "book",
+      "object_b": "spoon",
+      "source_caption": "A book to the left of a spoon",
+      "source_member": "controlled_clevr/book_left_of_spoon.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "book_right_of_cup.jpeg",
+      "object_a": "book",
+      "object_b": "cup",
+      "source_caption": "A book to the right of a cup",
+      "source_member": "controlled_clevr/book_right_of_cup.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "book_right_of_fork.jpeg",
+      "object_a": "book",
+      "object_b": "fork",
+      "source_caption": "A book to the right of a fork",
+      "source_member": "controlled_clevr/book_right_of_fork.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "book_right_of_knife.jpeg",
+      "object_a": "book",
+      "object_b": "knife",
+      "source_caption": "A book to the right of a knife",
+      "source_member": "controlled_clevr/book_right_of_knife.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "book_right_of_remote.jpeg",
+      "object_a": "book",
+      "object_b": "remote",
+      "source_caption": "A book to the right of a remote",
+      "source_member": "controlled_clevr/book_right_of_remote.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "book_right_of_scissors.jpeg",
+      "object_a": "book",
+      "object_b": "scissors",
+      "source_caption": "A book to the right of a scissors",
+      "source_member": "controlled_clevr/book_right_of_scissors.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "book_right_of_spoon.jpeg",
+      "object_a": "book",
+      "object_b": "spoon",
+      "source_caption": "A book to the right of a spoon",
+      "source_member": "controlled_clevr/book_right_of_spoon.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "bowl_left_of_book.jpeg",
+      "object_a": "bowl",
+      "object_b": "book",
+      "source_caption": "A bowl to the left of a book",
+      "source_member": "controlled_clevr/bowl_left_of_book.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "bowl_left_of_cup.jpeg",
+      "object_a": "bowl",
+      "object_b": "cup",
+      "source_caption": "A bowl to the left of a cup",
+      "source_member": "controlled_clevr/bowl_left_of_cup.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "bowl_left_of_fork.jpeg",
+      "object_a": "bowl",
+      "object_b": "fork",
+      "source_caption": "A bowl to the left of a fork",
+      "source_member": "controlled_clevr/bowl_left_of_fork.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "bowl_left_of_knife.jpeg",
+      "object_a": "bowl",
+      "object_b": "knife",
+      "source_caption": "A bowl to the left of a knife",
+      "source_member": "controlled_clevr/bowl_left_of_knife.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "bowl_left_of_remote.jpeg",
+      "object_a": "bowl",
+      "object_b": "remote",
+      "source_caption": "A bowl to the left of a remote",
+      "source_member": "controlled_clevr/bowl_left_of_remote.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "bowl_left_of_scissors.jpeg",
+      "object_a": "bowl",
+      "object_b": "scissors",
+      "source_caption": "A bowl to the left of a scissors",
+      "source_member": "controlled_clevr/bowl_left_of_scissors.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "bowl_left_of_spoon.jpeg",
+      "object_a": "bowl",
+      "object_b": "spoon",
+      "source_caption": "A bowl to the left of a spoon",
+      "source_member": "controlled_clevr/bowl_left_of_spoon.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "bowl_right_of_book.jpeg",
+      "object_a": "bowl",
+      "object_b": "book",
+      "source_caption": "A bowl to the right of a book",
+      "source_member": "controlled_clevr/bowl_right_of_book.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "bowl_right_of_cup.jpeg",
+      "object_a": "bowl",
+      "object_b": "cup",
+      "source_caption": "A bowl to the right of a cup",
+      "source_member": "controlled_clevr/bowl_right_of_cup.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "bowl_right_of_fork.jpeg",
+      "object_a": "bowl",
+      "object_b": "fork",
+      "source_caption": "A bowl to the right of a fork",
+      "source_member": "controlled_clevr/bowl_right_of_fork.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "bowl_right_of_knife.jpeg",
+      "object_a": "bowl",
+      "object_b": "knife",
+      "source_caption": "A bowl to the right of a knife",
+      "source_member": "controlled_clevr/bowl_right_of_knife.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "bowl_right_of_remote.jpeg",
+      "object_a": "bowl",
+      "object_b": "remote",
+      "source_caption": "A bowl to the right of a remote",
+      "source_member": "controlled_clevr/bowl_right_of_remote.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "bowl_right_of_scissors.jpeg",
+      "object_a": "bowl",
+      "object_b": "scissors",
+      "source_caption": "A bowl to the right of a scissors",
+      "source_member": "controlled_clevr/bowl_right_of_scissors.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "bowl_right_of_spoon.jpeg",
+      "object_a": "bowl",
+      "object_b": "spoon",
+      "source_caption": "A bowl to the right of a spoon",
+      "source_member": "controlled_clevr/bowl_right_of_spoon.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "cup_left_of_fork.jpeg",
+      "object_a": "cup",
+      "object_b": "fork",
+      "source_caption": "A cup to the left of a fork",
+      "source_member": "controlled_clevr/cup_left_of_fork.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "cup_left_of_knife.jpeg",
+      "object_a": "cup",
+      "object_b": "knife",
+      "source_caption": "A cup to the left of a knife",
+      "source_member": "controlled_clevr/cup_left_of_knife.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "cup_left_of_remote.jpeg",
+      "object_a": "cup",
+      "object_b": "remote",
+      "source_caption": "A cup to the left of a remote",
+      "source_member": "controlled_clevr/cup_left_of_remote.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "cup_left_of_scissors.jpeg",
+      "object_a": "cup",
+      "object_b": "scissors",
+      "source_caption": "A cup to the left of a scissors",
+      "source_member": "controlled_clevr/cup_left_of_scissors.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "cup_left_of_spoon.jpeg",
+      "object_a": "cup",
+      "object_b": "spoon",
+      "source_caption": "A cup to the left of a spoon",
+      "source_member": "controlled_clevr/cup_left_of_spoon.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "cup_right_of_fork.jpeg",
+      "object_a": "cup",
+      "object_b": "fork",
+      "source_caption": "A cup to the right of a fork",
+      "source_member": "controlled_clevr/cup_right_of_fork.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "cup_right_of_knife.jpeg",
+      "object_a": "cup",
+      "object_b": "knife",
+      "source_caption": "A cup to the right of a knife",
+      "source_member": "controlled_clevr/cup_right_of_knife.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "cup_right_of_remote.jpeg",
+      "object_a": "cup",
+      "object_b": "remote",
+      "source_caption": "A cup to the right of a remote",
+      "source_member": "controlled_clevr/cup_right_of_remote.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "cup_right_of_scissors.jpeg",
+      "object_a": "cup",
+      "object_b": "scissors",
+      "source_caption": "A cup to the right of a scissors",
+      "source_member": "controlled_clevr/cup_right_of_scissors.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "cup_right_of_spoon.jpeg",
+      "object_a": "cup",
+      "object_b": "spoon",
+      "source_caption": "A cup to the right of a spoon",
+      "source_member": "controlled_clevr/cup_right_of_spoon.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "mug_left_of_book.jpeg",
+      "object_a": "cup",
+      "object_b": "book",
+      "source_caption": "A mug to the left of a book",
+      "source_member": "controlled_clevr/mug_left_of_book.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "mug_left_of_bowl.jpeg",
+      "object_a": "cup",
+      "object_b": "bowl",
+      "source_caption": "A mug to the left of a bowl",
+      "source_member": "controlled_clevr/mug_left_of_bowl.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "mug_left_of_fork.jpeg",
+      "object_a": "cup",
+      "object_b": "fork",
+      "source_caption": "A mug to the left of a fork",
+      "source_member": "controlled_clevr/mug_left_of_fork.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "mug_left_of_knife.jpeg",
+      "object_a": "cup",
+      "object_b": "knife",
+      "source_caption": "A mug to the left of a knife",
+      "source_member": "controlled_clevr/mug_left_of_knife.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "mug_left_of_phone.jpeg",
+      "object_a": "cup",
+      "object_b": "cell phone",
+      "source_caption": "A mug to the left of a phone",
+      "source_member": "controlled_clevr/mug_left_of_phone.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "mug_left_of_remote.jpeg",
+      "object_a": "cup",
+      "object_b": "remote",
+      "source_caption": "A mug to the left of a remote",
+      "source_member": "controlled_clevr/mug_left_of_remote.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "mug_left_of_scissors.jpeg",
+      "object_a": "cup",
+      "object_b": "scissors",
+      "source_caption": "A mug to the left of a scissors",
+      "source_member": "controlled_clevr/mug_left_of_scissors.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "mug_left_of_spoon.jpeg",
+      "object_a": "cup",
+      "object_b": "spoon",
+      "source_caption": "A mug to the left of a spoon",
+      "source_member": "controlled_clevr/mug_left_of_spoon.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "mug_right_of_book.jpeg",
+      "object_a": "cup",
+      "object_b": "book",
+      "source_caption": "A mug to the right of a book",
+      "source_member": "controlled_clevr/mug_right_of_book.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "mug_right_of_bowl.jpeg",
+      "object_a": "cup",
+      "object_b": "bowl",
+      "source_caption": "A mug to the right of a bowl",
+      "source_member": "controlled_clevr/mug_right_of_bowl.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "mug_right_of_fork.jpeg",
+      "object_a": "cup",
+      "object_b": "fork",
+      "source_caption": "A mug to the right of a fork",
+      "source_member": "controlled_clevr/mug_right_of_fork.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "mug_right_of_knife.jpeg",
+      "object_a": "cup",
+      "object_b": "knife",
+      "source_caption": "A mug to the right of a knife",
+      "source_member": "controlled_clevr/mug_right_of_knife.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "mug_right_of_phone.jpeg",
+      "object_a": "cup",
+      "object_b": "cell phone",
+      "source_caption": "A mug to the right of a phone",
+      "source_member": "controlled_clevr/mug_right_of_phone.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "mug_right_of_remote.jpeg",
+      "object_a": "cup",
+      "object_b": "remote",
+      "source_caption": "A mug to the right of a remote",
+      "source_member": "controlled_clevr/mug_right_of_remote.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "mug_right_of_scissors.jpeg",
+      "object_a": "cup",
+      "object_b": "scissors",
+      "source_caption": "A mug to the right of a scissors",
+      "source_member": "controlled_clevr/mug_right_of_scissors.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "mug_right_of_spoon.jpeg",
+      "object_a": "cup",
+      "object_b": "spoon",
+      "source_caption": "A mug to the right of a spoon",
+      "source_member": "controlled_clevr/mug_right_of_spoon.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "remote_left_of_fork.jpeg",
+      "object_a": "remote",
+      "object_b": "fork",
+      "source_caption": "A remote to the left of a fork",
+      "source_member": "controlled_clevr/remote_left_of_fork.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "remote_left_of_scissors.jpeg",
+      "object_a": "remote",
+      "object_b": "scissors",
+      "source_caption": "A remote to the left of a scissors",
+      "source_member": "controlled_clevr/remote_left_of_scissors.jpeg"
+    },
+    {
+      "expected_relation": "left",
+      "filename": "remote_left_of_spoon.jpeg",
+      "object_a": "remote",
+      "object_b": "spoon",
+      "source_caption": "A remote to the left of a spoon",
+      "source_member": "controlled_clevr/remote_left_of_spoon.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "remote_right_of_fork.jpeg",
+      "object_a": "remote",
+      "object_b": "fork",
+      "source_caption": "A remote to the right of a fork",
+      "source_member": "controlled_clevr/remote_right_of_fork.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "remote_right_of_scissors.jpeg",
+      "object_a": "remote",
+      "object_b": "scissors",
+      "source_caption": "A remote to the right of a scissors",
+      "source_member": "controlled_clevr/remote_right_of_scissors.jpeg"
+    },
+    {
+      "expected_relation": "right",
+      "filename": "remote_right_of_spoon.jpeg",
+      "object_a": "remote",
+      "object_b": "spoon",
+      "source_caption": "A remote to the right of a spoon",
+      "source_member": "controlled_clevr/remote_right_of_spoon.jpeg"
+    }
+  ],
+  "selection_rule": "All source left/right rows whose two names map to distinct COCO classes; no prediction selection.",
+  "source": {
+    "annotations_sha256": "2c0df1ab59d13d71442752b4b3c7353114d712a785b0850ec22e11c2b0c474c9",
+    "archive_google_drive_id": "13jdBpg8t3NqW3jrL6FK8HO93vwsUjDxG",
+    "commit": "7c1f2550eace32e7b8c77de5a792347c402960d1",
+    "horizontal_rows": 204,
+    "ontology_mapping": {
+      "book": "book",
+      "bowl": "bowl",
+      "cup": "cup",
+      "fork": "fork",
+      "knife": "knife",
+      "mug": "cup",
+      "phone": "cell phone",
+      "remote": "remote",
+      "scissors": "scissors",
+      "spoon": "spoon"
+    },
+    "prior_six_hashes": {
+      "book_left_of_cup.jpeg": "0f1a76ed072600016caf50674bcfa8b56933d66f35cab9b7a838a964ff8fba73",
+      "book_right_of_cup.jpeg": "57f5a20ddcf94c6188e8f943abe854c25863b409f0d142f3cefb28d81bde22bc",
+      "mug_left_of_book.jpeg": "adb8bf97a53e22fb90bcbc7d9677ab107c811053308fecfe0db22fc3763b041f",
+      "mug_left_of_phone.jpeg": "f287bbd11093d2fe73e0833188fa453475356a4f18627d3e656bf54bb2db48bf",
+      "mug_right_of_book.jpeg": "57253d734b0869a37f8d5faa77275b51b02f2ca3b330d8de861630e8d41c28c2",
+      "mug_right_of_phone.jpeg": "a3296ad0bd67d51e10250cb2ada5a9fabaaa5d7e1fe316225f07c005e2e65c82"
+    },
+    "repository": "https://github.com/amitakamath/whatsup_vlms",
+    "selected_rows": 58,
+    "source_rows": 408
+  },
+  "source_hashes": {
+    "recipes.py": "c5cd2312e3371b551a3e67a35198c16fb67521633b145124e8ff62f980772d3b",
+    "verification.py": "807326c471328bfdd0d5f8fbfed4be583f3e4f9c4d9d037cc25033233700412a",
+    "visual_checks.py": "01273e0d78e785422b1bda5cdd08e19aec177f55b7c707c09810690654e199e7"
+  },
+  "timing": {
+    "cuda_synchronize": true,
+    "images": [
+      "book_left_of_cup.jpeg",
+      "book_right_of_cup.jpeg",
+      "mug_left_of_book.jpeg",
+      "mug_left_of_phone.jpeg",
+      "mug_right_of_book.jpeg",
+      "mug_right_of_phone.jpeg"
+    ],
+    "repetitions_per_image": 20,
+    "warmup_images": 6
+  }
+}

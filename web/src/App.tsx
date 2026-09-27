@@ -1,3 +1,4 @@
+import RecordedChecks, { checkOutcome, outcomeSymbol } from './RecordedChecks';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, clearPending, download, ensureHistoryCapacity, loadConnection, readPending, rememberSession, request, saveConnection, savePending, submitPending } from './api';
 import type { Capture, Connection, Mode, PendingCapture, Recipe, Result, Scenario, Session, Slot } from './api';
@@ -7,6 +8,7 @@ import { CaptureMedia } from './Evidence';
 const titles: Record<Recipe, string> = { spatial: 'Switch sides', temporal: 'Reverse arrival order' };
 const pendingStatus = (capture: Capture | null | undefined) => !!capture && ['queued', 'running'].includes(capture.status);
 const humanize = (text: string) => text.replaceAll('_', ' ').replace(/^./, value => value.toUpperCase());
+const configurationErrors: Record<string, string> = { execution_contract_mismatch: 'The worker uses a different detector than this collection requires. The operator must restore the pinned configuration.', execution_contract_migration_required: 'This historical session needs its recorded model pinned by the operator before inference can continue.', execution_evidence_mismatch: 'The saved observations do not match the frozen model contract. The operator must inspect their provenance.', detector_configuration_changed: 'The worker detector changed after startup. The operator must restart it with the pinned configuration.', provider_model_mismatch: 'Roboflow returned a different model identity. The response was not accepted; the operator must inspect the provider configuration.' };
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Please try again.';
 
 function Logo() { return <span className="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 7h10v18H4zM18 7h10v18H18z" fill="none" stroke="currentColor" strokeWidth="2"/><path d="M11 16h10m-4-4 4 4-4 4" fill="none" stroke="currentColor" strokeWidth="2"/></svg>counterpart<span className="brand-period">.</span></span>; }
@@ -36,10 +38,10 @@ function ReferenceGhost({ session, width, height }: { session: Session; width: n
 function Checks({ result, objectA = 'bottle', objectB = 'cup' }: { result?: Result | null; objectA?: string; objectB?: string }) {
   if (!result?.checks?.length) return null;
   const labels: Record<string, string> = { visible_unambiguous_objects: `${humanize(objectA)} and ${objectB} clearly visible`, requested_relation: 'Requested side confirmed', reference_position: `${humanize(objectB)} stayed in place`, requested_order: 'Arrival order confirmed', observation_gaps: 'No missing action interval', [`${objectA}_matching_endpoints`]: `${humanize(objectA)} endpoints match`, [`${objectB}_matching_endpoints`]: `${humanize(objectB)} endpoints match` };
-  const unique = [...new Map(result.checks.map(check => [`${check.name}:${check.passed}`, check])).values()];
+  const unique = [...new Map(result.checks.map(check => [`${check.name}:${checkOutcome(check)}`, check])).values()];
   const failures = unique.filter(check => !check.passed);
   const summary = failures.length ? failures.slice(0, 1) : unique.filter(check => labels[check.name]).slice(0, 3);
-  return <div className="verification-checks"><ul className="checks concise-checks">{summary.map((check, i) => <li key={`${check.name}-${i}`} className={check.passed ? 'pass' : 'fail'}><span className="check-mark" aria-hidden="true">{check.passed ? '✓' : '!'}</span><span>{check.passed ? labels[check.name] || humanize(check.name) : check.detail || humanize(check.name)}</span></li>)}</ul><details className="check-details"><summary>View all {unique.length} recorded checks</summary><ul className="checks">{unique.map((check, i) => <li key={`${check.name}-${i}`} className={check.passed ? 'pass' : 'fail'}><span className="check-mark" aria-hidden="true">{check.passed ? '✓' : '!'}</span><span>{humanize(check.name)}{check.detail && <small>{check.detail}</small>}</span></li>)}</ul></details></div>;
+  return <div className="verification-checks"><ul className="checks concise-checks">{summary.map((check, i) => <li key={`${check.name}-${i}`} className={checkOutcome(check)}><span className="check-mark" aria-hidden="true">{outcomeSymbol(checkOutcome(check))}</span><span>{check.passed ? labels[check.name] || humanize(check.name) : check.detail || humanize(check.name)}</span></li>)}</ul><details className="check-details"><summary>View all {unique.length} recorded checks</summary><RecordedChecks checks={unique}/></details></div>;
 }
 
 function Intro({ recipe, setRecipe, mode, setMode, create, busy, health, liveEnabled }: { recipe: Recipe; setRecipe: (recipe: Recipe) => void; mode: Mode; setMode: (mode: Mode) => void; create: () => void; busy: boolean; health: string; liveEnabled: boolean }) {
@@ -69,6 +71,9 @@ export default function App() {
   const [liveEnabled, setLiveEnabled] = useState(false);
   const [feedbackClock, setFeedbackClock] = useState(0);
   const previewTimes = useRef(new Map<string, number>());
+  const outstandingPreview = useRef<{ id: string; epoch: number; expiresAt: number } | null>(null);
+  const wakeSnapshotPoll = useRef<((delay?: number) => void) | null>(null);
+  const previewPollingEligible = useRef(false);
   const [pending, setPending] = useState<PendingCapture | null>(null);
   const [pendingConflict, setPendingConflict] = useState<string | null>(null);
   const [guidance, setGuidance] = useState(false);
@@ -83,37 +88,94 @@ export default function App() {
   const commandGeneration = useRef(0);
   const markDiscontinuity = useCallback(() => { needsResume.current = true; setGuidance(false); setResumeTick(value => value + 1); }, []);
   const camera = useCamera(markDiscontinuity);
+  previewPollingEligible.current = guidance && camera.status === 'ready' && !camera.recording && session?.mode === 'live' && session.state !== 'published';
 
   useEffect(() => { request<Record<string, unknown>>('/health').then(data => { setHealth(String(data.provider_mode || data.provider || 'ready')); setLiveEnabled(data.live_enabled === true); }).catch(() => setHealth('unavailable')); }, []);
 
   useEffect(() => {
     if (!connection) return;
-    let cancelled = false; let timer: ReturnType<typeof setTimeout>;
-    readPending(connection.id).then(value => { if (!cancelled) setPending(value || null); }).catch(() => { if (!cancelled) setNotice('Browser storage is unavailable. Keep this page open until each capture is saved.'); });
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let inFlight = false;
+    let failures = 0;
+    let requestedWake: number | null = null;
+    const abort = new AbortController();
+    const nextDelay = (snapshot: Session | null) => {
+      if (failures) return Math.min(1500 * 2 ** Math.min(failures - 1, 3), 10000);
+      const preview = outstandingPreview.current;
+      if (preview && (preview.epoch !== snapshot?.epoch || preview.expiresAt <= performance.now())) outstandingPreview.current = null;
+      if (previewPollingEligible.current && outstandingPreview.current) return 250;
+      return pendingStatus(snapshot?.latest_capture) ? 650 : 1500;
+    };
+    const schedule = (delay: number) => {
+      clearTimeout(timer); timer = undefined;
+      if (!cancelled && !document.hidden) timer = setTimeout(() => void poll(), delay);
+    };
+    const wake = (delay?: number) => {
+      if (cancelled) return;
+      const wait = delay ?? nextDelay(sessionRef.current);
+      if (inFlight) { requestedWake = requestedWake === null ? wait : Math.min(requestedWake, wait); return; }
+      schedule(wait);
+    };
     const poll = async () => {
+      if (cancelled || document.hidden || inFlight) return;
+      inFlight = true; timer = undefined;
       const generation = commandGeneration.current;
+      let latestSnapshot = sessionRef.current;
       try {
-        let snapshot = await request<Session>(`/sessions/${connection.id}`, connection);
+        let snapshot = await request<Session>(`/sessions/${connection.id}`, connection, { signal: abort.signal });
         if (needsResume.current && !busyRef.current) {
-          snapshot = await request<Session>(`/sessions/${connection.id}/resume`, connection, { method: 'POST', body: JSON.stringify({ expected_epoch: snapshot.epoch }) });
+          snapshot = await request<Session>(`/sessions/${connection.id}/resume`, connection, { method: 'POST', signal: abort.signal, body: JSON.stringify({ expected_epoch: snapshot.epoch }) });
           needsResume.current = false;
         }
         if (!cancelled) {
-          if (generation === commandGeneration.current) setSession(snapshot);
+          failures = 0;
+          if (generation === commandGeneration.current) {
+            latestSnapshot = snapshot;
+            setSession(snapshot);
+            const feedback = snapshot.feedback && 'id' in snapshot.feedback ? snapshot.feedback : null;
+            const preview = outstandingPreview.current;
+            if (preview && feedback?.id === preview.id && feedback.epoch === preview.epoch && !pendingStatus(feedback)) outstandingPreview.current = null;
+          }
           setNetwork('online');
         }
       } catch (cause) {
         if (!cancelled) {
+          failures++;
           if (cause instanceof ApiError && [401, 403, 404].includes(cause.status)) { setError('This saved session is no longer available. Start a new collection.'); saveConnection(null); setConnection(null); setSession(null); }
           else { setNetwork('offline'); needsResume.current = true; }
         }
       } finally {
-        if (!cancelled) timer = setTimeout(poll, pendingStatus(sessionRef.current?.latest_capture) ? 650 : 1500);
+        inFlight = false;
+        if (!cancelled) {
+          const wait = nextDelay(latestSnapshot);
+          schedule(requestedWake === null || failures ? wait : Math.min(wait, requestedWake));
+          requestedWake = null;
+        }
       }
     };
+    const visibilityChanged = () => {
+      if (document.hidden) { clearTimeout(timer); timer = undefined; }
+      else wake(0);
+    };
+    wakeSnapshotPoll.current = wake;
+    document.addEventListener('visibilitychange', visibilityChanged);
+    readPending(connection.id).then(value => { if (!cancelled) setPending(value || null); }).catch(() => { if (!cancelled) setNotice('Browser storage is unavailable. Keep this page open until each capture is saved.'); });
     void poll();
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [connection, resumeTick]);
+    return () => {
+      cancelled = true; abort.abort(); clearTimeout(timer);
+      document.removeEventListener('visibilitychange', visibilityChanged);
+      if (wakeSnapshotPoll.current === wake) wakeSnapshotPoll.current = null;
+    };
+  }, [connection]);
+
+  useEffect(() => { if (resumeTick > 0) wakeSnapshotPoll.current?.(0); }, [resumeTick]);
+  useEffect(() => {
+    if (!guidance || camera.status !== 'ready' || camera.recording) {
+      outstandingPreview.current = null;
+      wakeSnapshotPoll.current?.();
+    }
+  }, [guidance, camera.status, camera.recording]);
 
   useEffect(() => {
     const offline = () => { setNetwork('offline'); markDiscontinuity(); };
@@ -133,7 +195,12 @@ export default function App() {
         const blob = await camera.takePhoto();
         const packet: PendingCapture = { sessionId: connection.id, createdAt: Date.now(), blobs: [blob], metadata: { slot: 'preview', expected_revision: current.revision, epoch: current.epoch, client_seq: ++seq.current, idempotency_key: crypto.randomUUID(), timestamps_ms: [0], interrupted: false } };
         const response = await submitPending(connection, packet);
+        if (sessionRef.current?.id !== connection.id || sessionRef.current.epoch !== current.epoch) return;
         previewTimes.current.set(response.capture.id, capturedAt);
+        if (previewPollingEligible.current) {
+          outstandingPreview.current = { id: response.capture.id, epoch: current.epoch, expiresAt: performance.now() + 4000 };
+          wakeSnapshotPoll.current?.(250);
+        }
         if (previewTimes.current.size > 16) previewTimes.current.delete(previewTimes.current.keys().next().value!);
         setPreviewCount(value => value + 1);
       } catch (cause) {
@@ -154,8 +221,8 @@ export default function App() {
   }, [connection, session?.state]);
 
   useEffect(() => {
-    if (session?.state === 'ready' || session?.state === 'published') { camera.stop(); setGuidance(false); }
-  }, [session?.state, camera.stop]);
+    if ((session?.state === 'ready' && !session.human_review_required) || session?.state === 'published') { camera.stop(); setGuidance(false); }
+  }, [session?.state, session?.human_review_required, camera.stop]);
 
   const act = async (task: () => Promise<void>) => {
     if (busyRef.current) return;
@@ -194,7 +261,7 @@ export default function App() {
   };
   const capture = () => act(async () => {
     if (!connection || !session) return;
-    const slot: Slot = session.recovery_required ? 'recovery' : session.baseline ? 'counterpart' : 'baseline';
+    const slot: Slot = session.recovery_required && !session.human_review_required ? 'recovery' : session.baseline ? 'counterpart' : 'baseline';
     setGuidance(false);
     let blobs: Blob[]; let timestamps: number[];
     if (session.recipe === 'temporal' && slot !== 'recovery') {
@@ -229,19 +296,26 @@ export default function App() {
   const running = pendingStatus(latest);
   const result = latest?.result;
   const published = session?.state === 'published';
-  const complete = session?.state === 'ready' || published;
+  const humanRequired = Boolean(session?.human_review_required);
+  const complete = (session?.state === 'ready' && !humanRequired) || published;
+  const publishedManifest = published && session?.pair?.manifest ? session.pair.manifest as { baseline: Capture; counterpart: Capture; evidence_adjudication?: Record<string, unknown> } : null;
+  const displayBaseline = publishedManifest?.baseline || session?.baseline;
+  const displayCounterpart = publishedManifest?.counterpart || session?.counterpart;
   const second = !!session?.baseline;
-  const recovering = !!session?.recovery_required;
+  const recovering = !!session?.recovery_required && !humanRequired;
   const replayMode = session?.mode === 'replay';
   const latestMedia = latest && latest.frames?.length ? latest : session?.baseline;
-  const actionDisabled = busy || running || network !== 'online' || !!pending;
+  const configurationProblem = latest?.status === 'failed' && latest.error ? configurationErrors[latest.error] : undefined;
+  const actionDisabled = busy || running || network !== 'online' || !!pending || (Boolean(configurationProblem) && !complete);
+  const humanAdjudicated = Boolean(publishedManifest?.evidence_adjudication);
   const objectA = session?.object_a || 'bottle';
   const objectB = session?.object_b || 'cup';
   const contractInstructions = session?.recipe_snapshot?.instructions as Record<string, unknown> | undefined;
   const contractInstruction = contractInstructions?.[recovering ? 'recovery' : second ? 'counterpart' : 'baseline'];
   const instruction = !session ? '' : complete ? 'A complete pair. Every observation attached.' : typeof contractInstruction === 'string' ? contractInstruction : recovering ? 'Your first capture is safe. Check the scene to continue.' : session.recipe === 'spatial' ? second ? `Move only the ${objectA} to the right of the ${objectB}.` : `Place the ${objectA} to the left of the ${objectB}.` : second ? `${humanize(objectB)} first. Pause. Then the ${objectA}.` : `${humanize(objectA)} first. Pause. Then the ${objectB}.`;
   const supporting = !session ? '' : complete ? 'Both captures and their checks stay together in one versioned record.' : recovering ? session.recipe === 'temporal' ? 'Restore both objects to their starting lanes and keep the camera steady.' : `Keep the ${objectB} and camera in the same position as your saved capture.` : session.recipe === 'spatial' ? `Keep the ${objectB} in place and the camera steady. Make the gap between the objects clear.` : 'Start both objects in the left zone, one above the other. Move each into the target band. Hold the start and finish still.';
-  const primaryLabel = published ? 'Download complete pair' : complete ? 'Save the complete pair' : recovering ? 'Check current scene' : session?.recipe === 'temporal' ? second ? 'Record reverse sequence' : 'Record first sequence' : second ? 'Capture the counterpart' : 'Capture the first image';
+  const protectedObjects = Array.isArray(session?.recipe_snapshot?.protected_objects) ? session.recipe_snapshot.protected_objects.filter((item): item is string => typeof item === 'string') : [];
+  const primaryLabel = published ? 'Download complete pair' : humanRequired ? 'Capture for human review' : complete ? 'Save the complete pair' : recovering ? 'Check current scene' : session?.recipe === 'temporal' ? second ? 'Record reverse sequence' : 'Record first sequence' : second ? 'Capture the counterpart' : 'Capture the first image';
   const onPrimary = () => {
     if (published && connection) void act(() => download(connection, 'archive'));
     else if (complete) void publish();
@@ -263,7 +337,7 @@ export default function App() {
       <div className={`workspace ${complete ? 'complete' : ''}`}>
         <section className="capture-stage" aria-label="Capture workspace">
           <div className="stage-toolbar"><span><span className={`status-dot ${camera.recording ? 'recording' : ''}`}/>{complete ? 'PAIRED EVIDENCE' : replayMode ? 'RECORDED TEST SCENE' : camera.recording ? `RECORDING · ${camera.elapsed.toFixed(1)} / 12s` : 'LIVE VIEW'}</span><span>{session.recipe === 'temporal' ? 'ARRIVAL ORDER' : 'IMAGE-PLANE LEFT / RIGHT'}</span></div>
-          {complete && session.baseline && session.counterpart ? <div className="pair-grid"><div><div className="pair-label"><span>A / FIRST</span><strong>{session.recipe === 'spatial' ? `${humanize(objectA)} left` : `${humanize(objectA)} → ${objectB}`}</strong></div><CaptureMedia labels={[objectA, objectB]} capture={session.baseline} connection={connection}/></div><div><div className="pair-label"><span>B / COUNTERPART</span><strong>{session.recipe === 'spatial' ? `${humanize(objectA)} right` : `${humanize(objectB)} → ${objectA}`}</strong></div><CaptureMedia labels={[objectA, objectB]} capture={session.counterpart} connection={connection}/></div></div> : <div className="main-media">
+          {complete && displayBaseline && displayCounterpart ? <div className="pair-grid"><div><div className="pair-label"><span>A / FIRST</span><strong>{session.recipe === 'spatial' ? `${humanize(objectA)} left` : `${humanize(objectA)} → ${objectB}`}</strong></div><CaptureMedia labels={[objectA, objectB]} capture={displayBaseline} connection={connection}/></div><div><div className="pair-label"><span>B / COUNTERPART</span><strong>{session.recipe === 'spatial' ? `${humanize(objectA)} right` : `${humanize(objectB)} → ${objectA}`}</strong></div><CaptureMedia labels={[objectA, objectB]} capture={displayCounterpart} connection={connection}/></div></div> : <div className="main-media">
             {!replayMode && <div className="camera-shell" style={camera.status === 'ready' && camera.dimensions.width ? { aspectRatio: `${camera.dimensions.width} / ${camera.dimensions.height}` } : undefined}><video ref={camera.videoRef} autoPlay muted playsInline className={camera.status === 'ready' ? '' : 'camera-hidden'} aria-label="Live camera view"/>{camera.status !== 'ready' && <div className="camera-placeholder"><SetupDiagram objectA={objectA} objectB={objectB} temporal={session.recipe === 'temporal'}/><div className="camera-start"><button className="primary" disabled={camera.status === 'requesting'} onClick={camera.start}>{camera.status === 'requesting' ? 'Allow camera access…' : 'Open camera'}<Arrow/></button><p>Camera permission is requested by your browser.</p></div></div>}{session.recipe === 'temporal' && camera.status === 'ready' && <div className="zone-overlay" aria-hidden="true"><div className="start-zone"><span>START HERE</span></div><div className="target-zone"><span>TARGET AREA</span></div></div>}{camera.status === 'ready' && session.recipe === 'spatial' && !!session.baseline && <ReferenceGhost session={session} width={camera.dimensions.width} height={camera.dimensions.height}/>}{camera.recording && <div className="recording-chip"><span/>{camera.frameCount} frames saved</div>}</div>}
             {replayMode && (latestMedia ? <CaptureMedia labels={[objectA, objectB]} capture={latestMedia} connection={connection}/> : <SetupDiagram objectA={objectA} objectB={objectB} temporal={session.recipe === 'temporal'}/>)}
             {second && session.baseline && <div className="baseline-thumbnail"><div><span aria-hidden="true">✓</span> FIRST CAPTURE SAVED</div><CaptureMedia labels={[objectA, objectB]} capture={session.baseline} connection={connection} small/></div>}
@@ -275,17 +349,17 @@ export default function App() {
         </section>
         <aside className="instruction-panel"><div className="instruction-number">{complete ? '03' : second ? '02' : '01'}<span> / 03</span></div><p className="eyebrow">{published ? 'SAVED AS ONE RECORD' : recovering ? 'RESUME YOUR COLLECTION' : complete ? 'READY TO KEEP' : second ? 'MAKE THE CHANGE' : 'SET THE SCENE'}</p><h2>{instruction}</h2><p className="instruction-description">{supporting}</p>
           {running && <div className="verification-message checking" role="status"><span className="loading-dot"/><div><strong>{latest?.status === 'running' ? 'Checking the saved evidence' : 'Capture saved. Waiting for verification.'}</strong><p>{replayMode ? 'Evaluating the recorded test observations.' : 'Roboflow supplies detections; the recipe checks the relationship.'}</p>{session.progress && <div className="frame-progress"><progress value={session.progress.completed_frames} max={session.progress.total_frames}/><span>{session.progress.completed_frames} / {session.progress.total_frames} frames checked</span></div>}</div></div>}
-          {!running && result && <div className={`verification-message ${result.accepted ? 'accepted' : 'rejected'}`} role="status"><span>{result.accepted ? '✓' : '!'}</span><div><strong>{result.accepted ? latest?.slot === 'recovery' ? 'Scene checked' : 'Observation accepted' : second ? 'Keep the first. Fix this one.' : 'This scene needs a small repair.'}</strong><p>{result.message}</p></div></div>}
-          {!running && latest?.status === 'failed' && <div className="verification-message rejected" role="status"><span>!</span><div><strong>Verification could not finish</strong><p>{latest.error || 'Your saved evidence is retained. Try again after the service recovers.'}</p><button className="secondary" onClick={retryVerification} disabled={busy || recovering || network !== 'online'}>Retry verification of saved images</button></div></div>}
-          <div className="primary-action">{camera.recording ? <button className="primary recording-button" onClick={camera.stopRecording}>Stop & check sequence <span>■</span></button> : <button className="primary" onClick={onPrimary} disabled={actionDisabled || (!replayMode && !complete && camera.status !== 'ready')}>{busy ? 'Saving…' : running ? 'Checking…' : primaryLabel}<Arrow/></button>}<p>{published ? 'ZIP includes the manifest and original evidence.' : replayMode ? 'Simulation only. Nothing is sent to a Roboflow dataset.' : session.recipe === 'temporal' && !complete ? '4 sampled frames / second · 12 seconds maximum' : 'The saved capture is checked separately from live guidance.'}</p></div>
-          <Checks result={result} objectA={objectA} objectB={objectB}/>
-          {published && session.campaign_id && <div className={`collector-review ${session.review?.status || 'pending'}`} role="status"><strong>{session.review?.status === 'approved' ? 'Approved for this collection' : session.review?.status === 'rejected' ? 'The reviewer rejected this pair' : session.review?.status === 'needs_revision' ? 'The reviewer requested another pair' : 'Saved. Awaiting operator review.'}</strong>{session.review?.reason && <p>{session.review.reason}</p>}{['rejected', 'needs_revision'].includes(session.review?.status || '') && <p>The original evidence is preserved. Use your invitation to collect a new pair, or contact the collection owner.</p>}</div>}
+          {!running && result && !humanAdjudicated && <div className={`verification-message ${result.accepted ? 'accepted' : 'rejected'}`} role="status"><span>{result.accepted ? '✓' : '!'}</span><div><strong>{result.accepted ? humanRequired ? 'Checks passed; human review required' : latest?.slot === 'recovery' ? 'Scene checked' : 'Observation accepted' : result.outcome === 'unknown' ? 'This observation needs a closer look.' : second ? 'Keep the first. Fix this one.' : 'This scene needs a small repair.'}</strong><p>{result.message}</p></div></div>}
+          {!running && latest?.status === 'failed' && <div className="verification-message rejected" role="status"><span>!</span><div><strong>{configurationProblem ? 'Operator action needed' : 'Verification could not finish'}</strong><p>{configurationProblem || latest.error || 'Your saved evidence is retained. Try again after the service recovers.'}</p><button className="secondary" onClick={retryVerification} disabled={busy || recovering || network !== 'online'}>{configurationProblem ? 'Retry after the operator fixes the service' : 'Retry verification of saved images'}</button></div></div>}
+          <div className="primary-action">{camera.recording ? <button className="primary recording-button" onClick={camera.stopRecording}>Stop & check sequence <span>■</span></button> : <button className="primary" onClick={onPrimary} disabled={actionDisabled || (!replayMode && !complete && camera.status !== 'ready')}>{busy ? 'Saving…' : running ? 'Checking…' : primaryLabel}<Arrow/></button>}<p>{published ? 'ZIP includes the manifest and original evidence.' : humanRequired ? 'Saved for operator review. Capturing does not publish a dataset pair.' : replayMode ? 'Simulation only. Nothing is sent to a Roboflow dataset.' : session.recipe === 'temporal' && !complete ? '4 sampled frames / second · 12 seconds maximum' : 'The saved capture is checked separately from live guidance.'}</p></div>
+          {protectedObjects.length > 0 && !complete && <p className="protected-capture-note">Also keep {protectedObjects.join(", ")} visible and still. The camera and background are part of the recorded controls.</p>}<Checks result={result} objectA={objectA} objectB={objectB}/>
+          {humanRequired && !published && <div className="human-provenance"><strong>Collecting for human review</strong><p>The operator authorized this uncertain baseline so you can capture its counterpart. An operator must establish the final pair from both original observations.{session.recovery_required ? ' The scene has not been reverified after reconnection; that uncertainty remains recorded.' : ''}</p></div>}{humanAdjudicated && <div className="human-provenance"><strong>Established by human review</strong><p>The original machine decision remains recorded. This pair was established by a separate human adjudication.</p></div>}{published && session.campaign_id && <div className={`collector-review ${session.review?.status || 'pending'}`} role="status"><strong>{session.review?.status === 'approved' ? 'Approved for this collection' : session.review?.status === 'rejected' ? 'The reviewer rejected this pair' : session.review?.status === 'needs_revision' ? 'The reviewer requested another pair' : 'Saved. Awaiting operator review.'}</strong>{session.review?.reason && <p>{session.review.reason}</p>}{['rejected', 'needs_revision'].includes(session.review?.status || '') && <p>The original evidence is preserved. Use your invitation to collect a new pair, or contact the collection owner.</p>}</div>}
           {published && <button className="text-button manifest-link" onClick={() => act(() => download(connection, 'manifest'))}>Download manifest JSON <Arrow/></button>}
           {second && !complete && <div className="preserved-note"><span>↳</span><p>Your first observation stays saved through retries and reconnects.</p></div>}
         </aside>
       </div>
-      {session.baseline && latest?.status === 'rejected' && latest.id !== session.baseline.id && <section className="repair-evidence" aria-label="Compare the rejected capture"><p className="eyebrow">KEEP WHAT WORKED</p><h2>Compare. Repair. Continue.</h2><p>{result?.message} The reference is preserved below; the rejected attempt is saved separately.</p><div className="repair-grid"><div><h3>A / Accepted reference</h3><CaptureMedia capture={session.baseline} connection={connection} labels={[objectA, objectB]}/></div><div><h3>B / Attempt to repair</h3><CaptureMedia capture={latest} connection={connection} labels={[objectA, objectB]}/></div></div></section>}
-      <section className="evidence-section"><button className="evidence-heading" onClick={() => setShowEvidence(value => !value)} aria-expanded={showEvidence}><span><span className="eyebrow">UNDER THE SURFACE</span><strong>Evidence & session history</strong></span><span>{showEvidence ? '−' : '+'}</span></button>{showEvidence && <div className="evidence-body"><div className="evidence-summary"><div><span>Session revision</span><strong>{session.revision}</strong></div><div><span>Connection epoch</span><strong>{session.epoch}</strong></div><div><span>Evidence source</span><strong>{replayMode ? 'Test fixture' : 'Roboflow'}</strong></div><div><span>Publication</span><strong>{published ? 'Complete local record' : 'Not published'}</strong></div></div><p className="evidence-explanation">A late response cannot approve a newer capture. Retries keep the same identity. Publication requires both accepted observations; a local record does not imply a completed Roboflow export.</p><ol className="events">{session.events.length ? session.events.slice(-10).reverse().map((event, i) => <li key={String(event.id || i)}><span className="event-dot"/><div><strong>{String(event.message || humanize(String(event.type || event.kind || event.event || 'Session updated')))}</strong>{Boolean(event.created_at || event.at) && <time>{new Date(String(event.created_at || event.at)).toLocaleTimeString()}</time>}</div></li>) : <li>Capture activity will appear here.</li>}</ol>{!complete && <button className="secondary" onClick={reconnect} disabled={actionDisabled}>Reconnect & check recovery</button>}</div>}</section>
+      {session.baseline && latest?.status === 'rejected' && latest.id !== session.baseline.id && <section className="repair-evidence" aria-label="Compare the rejected capture"><p className="eyebrow">KEEP WHAT WORKED</p><h2>{humanRequired ? 'Review the recorded difference.' : 'Compare. Repair. Continue.'}</h2><p>{result?.message} The reference is preserved below; the rejected attempt is saved separately.</p><div className="repair-grid"><div><h3>{humanRequired ? 'A / First recorded observation' : 'A / Accepted reference'}</h3><CaptureMedia capture={session.baseline} connection={connection} labels={[objectA, objectB]}/></div><div><h3>{humanRequired ? 'B / Counterpart for review' : 'B / Attempt to repair'}</h3><CaptureMedia capture={latest} connection={connection} labels={[objectA, objectB]}/></div></div></section>}
+      <section className="evidence-section"><button className="evidence-heading" onClick={() => setShowEvidence(value => !value)} aria-expanded={showEvidence}><span><span className="eyebrow">UNDER THE SURFACE</span><strong>Evidence & session history</strong></span><span>{showEvidence ? '−' : '+'}</span></button>{showEvidence && <div className="evidence-body"><div className="evidence-summary"><div><span>Session revision</span><strong>{session.revision}</strong></div><div><span>Connection epoch</span><strong>{session.epoch}</strong></div><div><span>Evidence source</span><strong>{replayMode ? 'Test fixture' : 'Roboflow'}</strong></div><div><span>Publication</span><strong>{published ? 'Complete local record' : 'Not published'}</strong></div></div><p className="evidence-explanation">A late response cannot approve a newer capture. Retries keep the same identity. Publication preserves both original observations and the machine or human decisions establishing the pair. A local record does not imply a completed Roboflow export.</p><ol className="events">{session.events.length ? session.events.slice(-10).reverse().map((event, i) => <li key={String(event.id || i)}><span className="event-dot"/><div><strong>{String(event.message || humanize(String(event.type || event.kind || event.event || 'Session updated')))}</strong>{Boolean(event.created_at || event.at) && <time>{new Date(String(event.created_at || event.at)).toLocaleTimeString()}</time>}</div></li>) : <li>Capture activity will appear here.</li>}</ol>{!complete && <button className="secondary" onClick={reconnect} disabled={actionDisabled}>Reconnect & check recovery</button>}</div>}</section>
     </main>}
     <footer className="site-footer"><span>counterpart / built with roboflow</span><span>Collect deliberately.</span></footer>
   </div>;
