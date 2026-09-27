@@ -1,0 +1,25 @@
+import { useEffect, useState } from 'react';
+import QRCode from 'qrcode';
+import { Alert } from './Shell';
+import { formatDate, jsonPost, operator } from './productApi';
+import type { Campaign, Invite } from './productApi';
+
+function InviteLink({ invite }: { invite: Invite }) {
+  const [qr, setQr] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const url = `${window.location.origin}${window.location.pathname}#/join/${invite.token}`;
+  useEffect(() => { let active = true; QRCode.toDataURL(url, { width: 240, margin: 1, color: { dark: '#252821', light: '#fdfcf7' } }).then(value => { if (active) setQr(value); }).catch(() => setError('QR generation failed. The invitation link still works.')); return () => { active = false; }; }, [url]);
+  const localhost = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(window.location.hostname);
+  return <div className="invite-created"><div>{qr && <img src={qr} width="180" height="180" alt="Scan to open the collector invitation"/>}</div><div><p className="eyebrow">READY TO SHARE</p><h3>{invite.label || 'Collector invitation'}</h3><p>The link grants access to this collection only. Save it now; the secret is shown only when created.</p><label>Collector link<input aria-label="Collector invitation link" readOnly value={url} onFocus={event => event.target.select()}/></label><div className="button-row"><button className="secondary" onClick={async () => { try { await navigator.clipboard.writeText(url); setCopied(true); } catch { setError('Select the link and copy it manually; clipboard access is unavailable.'); } }}>{copied ? 'Copied' : 'Copy link'}</button><a className="text-button" href={`#/join/${invite.token}`}>Open collector view ↗</a></div>{localhost && <p className="inline-warning">This link points to this computer. For phone capture, open the workspace on your HTTPS deployment, then create an invitation there.</p>}<Alert message={error}/></div></div>;
+}
+
+export default function Invites({ campaign, invites, act, busy }: { campaign: Campaign; invites: Invite[]; act: (task: () => Promise<void>) => Promise<void>; busy: boolean }) {
+  const [label, setLabel] = useState('Collector');
+  const [max, setMax] = useState(campaign.target_pairs);
+  const [hours, setHours] = useState(24);
+  const [created, setCreated] = useState<Invite | null>(null);
+  return <section aria-label="Collector invitations"><div className="sharing-grid"><div className="section-lead"><p className="eyebrow">LET SOMEONE ELSE MAKE THE CHANGE</p><h2>One task.<br/>Any collector.</h2><p>Collectors see the instructions and capture workspace. Their invitation grants no operator access and has a bounded number of sessions.</p></div><form className="invite-form" onSubmit={event => { event.preventDefault(); void act(async () => setCreated(await operator<Invite>(`/campaigns/${campaign.id}/invites`, jsonPost({ label, expires_in_hours: hours, max_sessions: max })))); }}><label>Invitation label<input aria-label="Invitation label" value={label} onChange={event => setLabel(event.target.value)} maxLength={100} required/></label><div className="form-two"><label>Maximum sessions<input aria-label="Maximum sessions" type="number" min={1} max={1000} value={max} onChange={event => setMax(Number(event.target.value))}/></label><label>Expires after<select aria-label="Invitation duration" value={hours} onChange={event => setHours(Number(event.target.value))}><option value={1}>1 hour</option><option value={24}>24 hours</option><option value={168}>7 days</option></select></label></div><button className="primary" disabled={busy || !label.trim()}>Create collector invitation <span aria-hidden="true">↗</span></button></form></div>{created && <InviteLink invite={created}/>}
+    <div className="invitation-list">{invites.map(invite => <article key={invite.id}><div><strong>{invite.label || 'Collector invitation'}</strong><p>{invite.sessions_created} / {invite.max_sessions} sessions · expires {formatDate(invite.expires_at)}</p></div><span className={`tag ${invite.revoked_at ? 'rejected' : ''}`}>{invite.revoked_at ? 'Closed to new joins' : new Date(invite.expires_at).getTime() < Date.now() ? 'Expired' : 'Active'}</span>{!invite.revoked_at && <button className="text-button danger" disabled={busy} onClick={() => void act(async () => { await operator(`/campaigns/${campaign.id}/invites/${invite.id}/revoke`, jsonPost({})); if (created?.id === invite.id) setCreated(null); })}>Stop new joins</button>}</article>)}</div>
+  </section>;
+}

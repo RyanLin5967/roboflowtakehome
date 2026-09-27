@@ -1,7 +1,7 @@
 """Incremental, fenced Roboflow publication from immutable local pair manifests.
 
-An iteration performs at most one provider request, so capture verification can
-preempt a long sequence export between every image/annotation. A persisted write
+An iteration performs at most one publication operation and one read-only privacy
+check, so capture verification can preempt between every image/annotation. A persisted write
 intent survives the dangerous crash window after an external effect but before
 its receipt. Such an upload is reconciled, never blindly repeated. Annotation
 ambiguity needs operator reconciliation: the adapter has no trustworthy readback.
@@ -16,6 +16,8 @@ import re
 from uuid import uuid4
 
 from .config import Settings
+from .destination import DestinationError, DestinationResolver
+from .object_storage import MediaUnavailable
 from .providers import ProviderError, RoboflowExporter, voc_prediction
 from .repository import Repository
 from .splits import split_for_session
@@ -101,13 +103,21 @@ class ExportWorker:
         config: Settings,
         exporter: RoboflowExporter | None = None,
         worker_id: str | None = None,
+        *,
+        destination_resolver: DestinationResolver | None = None,
     ):
         self.repo, self.media, self.config, self.exporter = repo, media, config, exporter
+        self.destination_resolver = destination_resolver
         self.worker_id = worker_id or f"export-{uuid4().hex[:12]}"
 
     def once(self) -> bool:
         """Advance one phase; False means disabled or no eligible work."""
-        if not self.config.export_enabled or not self.config.export_project or self.exporter is None:
+        if (
+            not self.config.export_enabled
+            or not self.config.export_project
+            or self.exporter is None
+            or self.destination_resolver is None
+        ):
             return False
         if self.exporter.project != self.config.export_project:
             log.error("Export adapter destination does not match configured project")
@@ -119,6 +129,14 @@ class ExportWorker:
             self._advance(job)
         except InvalidExport as exc:
             self.repo.export_finish(job["pair_id"], job["lease_token"], "failed", error=str(exc))
+        except DestinationError as exc:
+            self.repo.export_finish(
+                job["pair_id"],
+                job["lease_token"],
+                "pending" if exc.retryable else "failed",
+                error=exc.code,
+                delay_seconds=30 if exc.retryable else 0,
+            )
         except Exception as exc:
             # DB failures leave the intent leased for safe expiry/recovery. Never
             # overwrite an external-write intent with a guessed failure outcome.
@@ -128,11 +146,17 @@ class ExportWorker:
     def _advance(self, job: dict) -> None:
         pair_id, lease = job["pair_id"], job["lease_token"]
         manifest, receipts = job["manifest"], job["receipts"]
+        expected = {
+            "workspace": self.exporter.workspace,
+            "project": self.exporter.project,
+            "visibility": "private",
+        }
+        if job.get("destination") != expected:
+            raise InvalidExport("export_destination_mismatch")
         assets = _assets(manifest, pair_id)
         destination = {
             "provider": "roboflow",
-            "workspace": self.exporter.workspace,
-            "project": self.exporter.project,
+            **expected,
         }
         split = export_split(manifest["split_group"])
         if not isinstance(receipts, dict):
@@ -214,8 +238,14 @@ class ExportWorker:
     def _upload(self, job: dict, frame: dict, base: dict) -> None:
         try:
             image = self.media.read(frame["asset_id"])
+        except MediaUnavailable:
+            self.repo.export_finish(
+                job["pair_id"], job["lease_token"], "pending", error="media_unavailable", delay_seconds=10
+            )
+            return
         except (OSError, ValueError):
             raise InvalidExport("invalid_export_media") from None
+        self._verify_destination(job, force=True)
         pending = {**base, "state": "uploading"}
         if not self._ready_to_dispatch(job, pending):
             return
@@ -253,6 +283,7 @@ class ExportWorker:
         )
 
     def _reconcile(self, job: dict, receipt: dict) -> None:
+        self._verify_destination(job)
         attempts = receipt.get("reconciliation_attempts", 0)
         if type(attempts) is not int or not 0 <= attempts <= len(_RECONCILIATION_DELAYS) + 1:
             raise InvalidExport("invalid_reconciliation_attempts")
@@ -294,6 +325,7 @@ class ExportWorker:
         self._release(job, reconciled)
 
     def _annotate(self, job: dict, frame: dict, receipt: dict) -> None:
+        self._verify_destination(job)
         if receipt.get("metadata_confirmed") is not True or not self._valid_image_receipt(receipt, receipt):
             raise InvalidExport("unconfirmed_image_receipt")
         expected_hash = hashlib.sha256(
@@ -322,3 +354,7 @@ class ExportWorker:
             self._uncertain(job, pending, "annotation_outcome_unknown")
             return
         self._release(job, confirmed)
+
+    def _verify_destination(self, job: dict, *, force: bool = False) -> None:
+        if self.destination_resolver.resolve(force=force) != job["destination"]:
+            raise InvalidExport("export_destination_mismatch")

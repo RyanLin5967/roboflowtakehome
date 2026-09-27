@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "project": "Counterpart",
+  "status": "active",
+  "authorized": "2026-09-26: user explicitly requested a persistent loop until the whole product is built",
+  "objective": "Complete the operator-to-collector-to-reviewed-dataset product and its necessary reliable infrastructure; prove each acceptance gate with executed evidence.",
+  "orchestrator_note": "Native create_goal was refused because this thread still has a paused unfinished CoverageCV goal. Do not falsely complete or resume that unrelated goal. This separate durable loop tracks Counterpart; it does not claim automatic execution after the session closes.",
+  "cycle": [
+    "Audit a concrete gap against the selected product",
+    "Freeze a bounded change and failure cases",
+    "Implement with ownership and provider budgets",
+    "Run appropriate real tests and adversarial review",
+    "Record evidence and unresolved limitations",
+    "Choose the next incomplete acceptance gate"
+  ],
+  "stop_policy": "Do not stop at an intermediate checkpoint. Stop if the user asks, actual execution limits require it, or every independently executable acceptance gate is complete and remaining gates require external evidence/access. Never claim unexecuted physical validation or hosted deployment is done.",
+  "constraints": [
+    "Zero out-of-pocket",
+    "No local ML",
+    "Secrets outside repo",
+    "No camera evidence auto-export to public projects",
+    "No invented benchmarks",
+    "No unrelated CoverageCV work"
+  ],
+  "current_cycle": "Independent software gates verified; physical collector evidence and external deployment/access gates remain open",
+  "gates": {
+    "research_and_original_capture_kernel": "verified checkpoint a51fa31; not complete product",
+    "operator_campaign_and_invites": "verified software implementation; see research/software_validation.json and docs/VALIDATION_REPORT.md",
+    "persistent_library_and_human_review": "verified software implementation; see research/software_validation.json and docs/VALIDATION_REPORT.md",
+    "explicit_reviewed_dataset_release": "verified software implementation; see research/software_validation.json and docs/VALIDATION_REPORT.md",
+    "versioned_configurable_recipes": "verified software implementation; see research/software_validation.json and docs/VALIDATION_REPORT.md",
+    "durable_per_frame_inference_and_progress": "verified software implementation; see research/software_validation.json and docs/VALIDATION_REPORT.md",
+    "shared_object_storage_and_deployment_package": "S3 HTTP and filesystem tests, Compose configuration verified; actual container boot/TLS blocked by unavailable Docker daemon",
+    "public_mode_auth_admission_and_retention": "verified software implementation; see research/software_validation.json and docs/VALIDATION_REPORT.md",
+    "independent_capture_evaluation": "harness and frozen protocol verified; actual human scene evidence outstanding",
+    "real_cloud_perception_and_dataset_transport": "six tabletop images and generated-card transport verified; private camera destination unavailable on current workspace",
+    "full_product_browser_and_fault_tests": "verified software implementation; see research/software_validation.json and docs/VALIDATION_REPORT.md",
+    "physical_collector_trial": "pending user capture; app running and asynchronous test request sent",
+    "reviewable_demo_and_runbooks": "verified software implementation; see research/software_validation.json and docs/VALIDATION_REPORT.md",
+    "portable_dataset_consumer": "verified including real browser-generated downloads and hostile archive tests"
+  },
+  "software_checkpoints": {
+    "python_tests_passed": 752,
+    "browser_tests_passed": 17,
+    "no_skipped_python_tests": true,
+    "actual_product_browser_recipes": [
+      "spatial",
+      "temporal"
+    ]
+  }
+}

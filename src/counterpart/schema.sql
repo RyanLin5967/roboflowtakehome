@@ -105,3 +105,15 @@ CREATE INDEX IF NOT EXISTS counterpart_exports_claim ON counterpart_export_inten
 -- Provider search may lag successful uploads; persist bounded read-only retry time.
 ALTER TABLE counterpart_export_intents ADD COLUMN IF NOT EXISTS available_at timestamptz NOT NULL DEFAULT clock_timestamp();
 CREATE INDEX IF NOT EXISTS counterpart_exports_available ON counterpart_export_intents(status, available_at);
+
+-- Frozen recipes are nullable only for evidence created before recipe versioning.
+-- Never backfill a historical session with today's verifier parameters.
+ALTER TABLE counterpart_sessions ADD COLUMN IF NOT EXISTS recipe_snapshot jsonb;
+ALTER TABLE counterpart_sessions ADD COLUMN IF NOT EXISTS campaign_id uuid;
+ALTER TABLE counterpart_export_intents ADD COLUMN IF NOT EXISTS destination jsonb;
+ALTER TABLE counterpart_export_intents ADD COLUMN IF NOT EXISTS requested_by text;
+ALTER TABLE counterpart_export_intents ADD COLUMN IF NOT EXISTS requested_at timestamptz;
+ALTER TABLE counterpart_captures ADD COLUMN IF NOT EXISTS reference_capture_id uuid
+    REFERENCES counterpart_captures(id);
+ALTER TABLE counterpart_captures ADD COLUMN IF NOT EXISTS retry_of_capture_id uuid
+    REFERENCES counterpart_captures(id);

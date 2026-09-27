@@ -1,0 +1,103 @@
+{
+  "schema_version": "counterpart.software-validation.v1",
+  "recorded_at": "2026-09-27T00:25:53.306613+00:00",
+  "scope": "Full product implementation in this checkout; external physical and deployment gates remain open",
+  "python": {
+    "passed": 752,
+    "skipped": 0,
+    "failed": 0,
+    "seconds": 42.22,
+    "command": "COUNTERPART_TEST_DSN=postgresql:///counterpart_test uv run pytest -q"
+  },
+  "browser_unit": {
+    "passed": 17,
+    "failed": 0,
+    "seconds": 15.3,
+    "api": "mocked; actual browser media and persistence",
+    "command": "npm --prefix web test"
+  },
+  "capture_browser": {
+    "kind": "Real browser/API/worker; synthetic observations, no model calls",
+    "scenarios": [
+      {
+        "recipe": "spatial",
+        "passed": true,
+        "rejected_wrong_attempt": true,
+        "reload_recovery": true,
+        "zip_downloaded": true,
+        "mobile_horizontal_overflow": false,
+        "browser_errors": []
+      },
+      {
+        "recipe": "temporal",
+        "passed": true,
+        "rejected_wrong_attempt": true,
+        "reload_recovery": true,
+        "zip_downloaded": true,
+        "mobile_horizontal_overflow": false,
+        "browser_errors": []
+      }
+    ]
+  },
+  "product_browser": {
+    "kind": "Actual product UI/API/PostgreSQL/worker; labeled fixture observations, no model calls",
+    "scenarios": [
+      {
+        "recipe": "spatial",
+        "passed": true,
+        "separate_collector_contexts": 2,
+        "incomplete_session_discoverable": true,
+        "rejected_attempt_repaired_after_reload": true,
+        "durable_local_library": true,
+        "independent_review_action": true,
+        "released_zip_downloaded": true,
+        "mobile_horizontal_overflow": false,
+        "browser_errors": []
+      },
+      {
+        "recipe": "temporal",
+        "passed": true,
+        "separate_collector_contexts": 2,
+        "incomplete_session_discoverable": true,
+        "rejected_attempt_repaired_after_reload": true,
+        "durable_local_library": true,
+        "independent_review_action": true,
+        "released_zip_downloaded": true,
+        "mobile_horizontal_overflow": false,
+        "browser_errors": []
+      }
+    ]
+  },
+  "portable_consumer": {
+    "actual_downloaded_archives": [
+      "spatial",
+      "temporal"
+    ],
+    "passed": true,
+    "fixture_opt_in_required": true
+  },
+  "builds": {
+    "ruff": "passed",
+    "typescript_vite": "passed",
+    "python_wheel": "passed",
+    "sql_resources_in_wheel": [
+      "collection_schema.sql",
+      "schema.sql"
+    ],
+    "git_diff_check": "passed"
+  },
+  "provider": {
+    "new_hosted_photo_calls": 6,
+    "image_reservations_after": 8,
+    "image_reservation_limit": 512,
+    "modal_calls": 0,
+    "local_model_calls": 0
+  },
+  "unexecuted": [
+    "actual physical collector study",
+    "actual camera temporal quality",
+    "real private camera dataset export",
+    "container build/start and public TLS",
+    "remote GitHub CI"
+  ]
+}

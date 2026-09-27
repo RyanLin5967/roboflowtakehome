@@ -1,0 +1,19 @@
+{
+	# Access logs are deliberately disabled: capture URLs may be sensitive.
+	admin off
+}
+
+{$COUNTERPART_DOMAIN} {
+	encode zstd gzip
+	request_body {
+		max_size 25MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		Permissions-Policy "camera=(self), microphone=(), geolocation=()"
+		-X-Powered-By
+	}
+	reverse_proxy api:8080
+}

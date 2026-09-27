@@ -5,19 +5,24 @@ import signal
 import threading
 import uuid
 
+import psycopg
+
 from .config import Settings, settings
+from .inference_runtime import InferenceRuntime
+from .object_storage import EvidenceStore, MediaUnavailable, create_media_store
+from .recipes import RecipeContractError, assert_runtime_compatible
 from .repository import Repository
-from .storage import MediaStore
 from .verification import verify
 
 log = logging.getLogger(__name__)
+WORKER_HEARTBEAT_SECONDS = 5
 
 
 class Worker:
     def __init__(
         self,
         repo: Repository,
-        media: MediaStore,
+        media: EvidenceStore,
         config: Settings,
         detector=None,
         worker_id: str | None = None,
@@ -25,6 +30,8 @@ class Worker:
     ):
         self.repo, self.media, self.config = repo, media, config
         self.detector = detector
+        self.runtime = InferenceRuntime(repo, media, config, detector)
+        self.inference = self.runtime if detector is not None else None
         self.export_worker = export_worker
         self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:12]}"
         self.stop = threading.Event()
@@ -37,31 +44,36 @@ class Worker:
         job_id, lease = job["id"], job["lease_token"]
         source = capture["frames"]
         try:
+            snapshot = session.get("recipe_snapshot")
+            assert_runtime_compatible(snapshot)
+            if any(snapshot[key] != session[key] for key in ("recipe", "object_a", "object_b")):
+                raise RecipeContractError("Session roles differ from its frozen recipe.")
             if session["mode"] == "live":
-                if not self.config.live_enabled or self.detector is None:
+                if not self.config.live_enabled or self.inference is None:
                     self.repo.fail(job_id, lease, "live_disabled")
                     return True
-                # Reserve the whole sequence before any model call; no half-funded capture.
-                if not self.repo.reserve_budget(
-                    "roboflow", f"{job_id}:{lease}", len(source), self.config.inference_limit
-                ):
-                    self.repo.fail(job_id, lease, "budget_exhausted")
-                    return True
-            observations = []
-            for frame in source:
-                if not self.repo.heartbeat(job_id, lease):
-                    return True
-                image = self.media.read(frame["asset_id"])
-                if session["mode"] == "replay":
-                    detected = {
-                        "detections": frame["fixture_detections"],
-                        "model": {"provider": "fixture", "model_id": "illustrative-replay-v1"},
-                    }
-                else:
-                    detected = self.detector.detect(image, frame["width"], frame["height"])
-                observations.append(
-                    {**{k: v for k, v in frame.items() if k != "fixture_detections"}, **detected}
+                # Each image dispatch owns a durable reservation/checkpoint.
+                # A retried sequence reuses completed immutable observations;
+                # ambiguous attempts remain charged and never get refunded.
+                observations = self.inference.observe_frames(
+                    source,
+                    session_id=session["id"],
+                    job_key=f"{job_id}:{lease}",
+                    heartbeat=lambda: self.repo.heartbeat(job_id, lease),
                 )
+            else:
+                observations = []
+                for frame in source:
+                    if not self.repo.heartbeat(job_id, lease):
+                        return True
+                    self.media.read(frame["asset_id"])
+                    observations.append(
+                        {
+                            **{k: v for k, v in frame.items() if k != "fixture_detections"},
+                            "detections": frame["fixture_detections"],
+                            "model": {"provider": "fixture", "model_id": "illustrative-replay-v1"},
+                        }
+                    )
             baseline_capture = session.get("baseline")
             baseline = (
                 {**baseline_capture["result"], "frames": baseline_capture["frames"]}
@@ -82,7 +94,13 @@ class Worker:
             # Exception text may contain a provider URL/secret. Persist an allowlisted code only.
             from .providers import ProviderError
 
-            if isinstance(exc, ProviderError):
+            if isinstance(exc, RecipeContractError):
+                self.repo.fail(job_id, lease, "unsupported_recipe")
+            elif isinstance(exc, psycopg.OperationalError):
+                self.repo.fail(job_id, lease, "database_unavailable", retryable=True)
+            elif isinstance(exc, MediaUnavailable):
+                self.repo.fail(job_id, lease, "media_unavailable", retryable=True)
+            elif isinstance(exc, ProviderError):
                 self.repo.fail(job_id, lease, exc.code, retryable=exc.retryable)
             elif isinstance(exc, (OSError, ValueError, KeyError)):
                 self.repo.fail(job_id, lease, "invalid_evidence")
@@ -93,14 +111,47 @@ class Worker:
         return True
 
     def run(self):
-        while not self.stop.is_set():
+        generation = None
+        while generation is None and not self.stop.is_set():
             try:
-                if not self.once():
-                    if self.export_worker is None or not self.export_worker.once():
-                        self.stop.wait(0.25)
+                generation = self.runtime.worker_started(self.worker_id)
             except Exception as exc:
-                log.error("Worker loop unavailable (%s)", type(exc).__name__)
+                log.error("Worker registration unavailable (%s)", type(exc).__name__)
                 self.stop.wait(2)
+        if generation is None:
+            return
+        monitor_stop = threading.Event()
+
+        def keep_alive():
+            while not monitor_stop.wait(WORKER_HEARTBEAT_SECONDS):
+                try:
+                    if not self.runtime.worker_heartbeat(self.worker_id, generation):
+                        # Another incarnation reused this name. Do not make it
+                        # appear healthy by reviving an old registration.
+                        self.stop.set()
+                        return
+                except Exception as exc:
+                    log.error("Worker heartbeat unavailable (%s)", type(exc).__name__)
+
+        monitor = threading.Thread(target=keep_alive, name="worker-presence", daemon=True)
+        monitor.start()
+        try:
+            while not self.stop.is_set():
+                try:
+                    if not self.once():
+                        if self.export_worker is None or not self.export_worker.once():
+                            self.stop.wait(0.25)
+                except Exception as exc:
+                    log.error("Worker loop unavailable (%s)", type(exc).__name__)
+                    self.stop.wait(2)
+        finally:
+            monitor_stop.set()
+            monitor.join(timeout=6)
+            try:
+                self.runtime.worker_stopped(self.worker_id, generation)
+            except Exception as exc:
+                # If the database is unavailable, the registry expires by time.
+                log.error("Worker stop acknowledgement unavailable (%s)", type(exc).__name__)
 
 
 def main():
@@ -114,9 +165,11 @@ def main():
         key = config.credentials()["ROBOFLOW_API_KEY"].get_secret_value()
         if key:
             detector = RoboflowDetector(key, config.roboflow_model)
-    media = MediaStore(config.media_dir)
+    media = create_media_store(config)
     export_worker = None
+    destination_resolver = None
     if config.export_enabled and config.export_project:
+        from .destination import DestinationResolver
         from .exporting import ExportWorker
         from .providers import RoboflowExporter
 
@@ -125,11 +178,22 @@ def main():
         workspace = credentials["ROBOFLOW_WORKSPACE"].get_secret_value()
         if key and workspace:
             exporter = RoboflowExporter(key, workspace, config.export_project)
-            export_worker = ExportWorker(repo, media, config, exporter)
+            destination_resolver = DestinationResolver(config)
+            export_worker = ExportWorker(
+                repo, media, config, exporter, destination_resolver=destination_resolver
+            )
     worker = Worker(repo, media, config, detector, export_worker=export_worker)
     signal.signal(signal.SIGINT, lambda *_: worker.stop.set())
     signal.signal(signal.SIGTERM, lambda *_: worker.stop.set())
-    worker.run()
+    try:
+        worker.run()
+    finally:
+        if detector is not None:
+            detector.close()
+        if export_worker is not None:
+            exporter.close()
+        if destination_resolver is not None:
+            destination_resolver.close()
 
 
 if __name__ == "__main__":

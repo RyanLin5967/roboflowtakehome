@@ -12,6 +12,7 @@ import pytest
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
+from counterpart.collections import CollectionRepository
 from counterpart.repository import Conflict, Repository
 
 pytestmark = pytest.mark.postgres
@@ -35,7 +36,29 @@ def repository():
 
 
 def session(repository, mode="replay"):
+    if mode == "live":
+        collections = CollectionRepository(repository)
+        campaign = collections.create_campaign("Export test", "spatial")
+        invite = collections.create_invite(campaign["id"])
+        return collections.create_session_from_invite(invite["token"], uuid4().hex)["session"]
     return repository.create_session("spatial", mode, "bottle", "cup")["session"]
+
+
+def request_test_export(repository, pair):
+    if pair["manifest"]["mode"] == "replay":
+        return
+    collections = CollectionRepository(repository)
+    collections.review_pair(
+        pair["manifest"]["campaign_id"],
+        pair["id"],
+        decision="approved",
+        expected_version=0,
+        reviewer="fixture-reviewer",
+        idempotency_key=uuid4().hex,
+    )
+    collections.request_export(
+        pair["id"], {"workspace": "test", "project": "private", "visibility": "private"}, "fixture-reviewer"
+    )
 
 
 def submit(repository, saved, slot="baseline", key=None, seq=0):
@@ -362,6 +385,7 @@ def test_export_fenced_progress_complete_gate_and_immutable_receipts(repository)
     saved = accepted(repository, session(repository, mode="live"))
     saved = accepted(repository, saved, "counterpart")
     pair = repository.publish(saved["id"], saved["revision"])
+    request_test_export(repository, pair)
     initial_manifest = pair["manifest"]
     job = repository.export_claim("exporter")
     assert job["pair_id"] == pair["id"]
@@ -410,11 +434,13 @@ def test_export_fenced_progress_complete_gate_and_immutable_receipts(repository)
 def test_export_uncertainty_is_not_blindly_retried_and_replay_is_never_exported(repository):
     replay = accepted(repository, session(repository))
     replay = accepted(repository, replay, "counterpart")
-    repository.publish(replay["id"], replay["revision"])
+    pair = repository.publish(replay["id"], replay["revision"])
+    request_test_export(repository, pair)
     assert repository.export_claim("worker") is None
     live = accepted(repository, session(repository, mode="live"))
     live = accepted(repository, live, "counterpart")
-    repository.publish(live["id"], live["revision"])
+    pair = repository.publish(live["id"], live["revision"])
+    request_test_export(repository, pair)
     job = repository.export_claim("worker")
     assert repository.export_finish(job["pair_id"], job["lease_token"], "pending")
     job = repository.export_claim("worker")
@@ -547,6 +573,7 @@ def test_export_reconciliation_delay_persists_without_reupload_or_worker_sleep(r
     saved = accepted(repository, session(repository, mode="live"))
     saved = accepted(repository, saved, "counterpart")
     pair = repository.publish(saved["id"], saved["revision"])
+    request_test_export(repository, pair)
     job = repository.export_claim("first")
     asset = pair["manifest"]["baseline"]["frames"][0]["asset_id"]
     receipt = {"state": "uploading", "reconciliation_attempts": 1}
@@ -575,6 +602,7 @@ def test_export_expired_running_recovery_ignores_delayed_pending_schedule(reposi
     saved = accepted(repository, session(repository, mode="live"))
     saved = accepted(repository, saved, "counterpart")
     pair = repository.publish(saved["id"], saved["revision"])
+    request_test_export(repository, pair)
     first = repository.export_claim("crashed")
     with psycopg.connect(repository.dsn) as connection:
         connection.execute(
@@ -591,6 +619,7 @@ def test_export_delay_rejects_invalid_values_without_mutating_state(repository, 
     saved = accepted(repository, session(repository, mode="live"))
     saved = accepted(repository, saved, "counterpart")
     pair = repository.publish(saved["id"], saved["revision"])
+    request_test_export(repository, pair)
     job = repository.export_claim("worker")
     with pytest.raises(ValueError, match="Export delay"):
         repository.export_finish(pair["id"], job["lease_token"], "pending", delay_seconds=delay)

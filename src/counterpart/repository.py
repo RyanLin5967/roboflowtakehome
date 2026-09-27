@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import math
 import re
 import secrets
@@ -80,6 +81,7 @@ class Repository:
         with self._connection() as connection:
             connection.execute("SELECT pg_advisory_xact_lock(780245190220)")
             connection.execute(Path(__file__).with_name("schema.sql").read_text())
+            connection.execute(Path(__file__).with_name("collection_schema.sql").read_text())
 
     @staticmethod
     def _session(connection, session_id: str, *, lock: bool = False) -> dict:
@@ -121,6 +123,9 @@ class Repository:
                 "epoch": row["epoch"],
                 "client_seq": row["client_seq"],
                 "created_at": row["created_at"],
+                "completed_at": row["completed_at"],
+                "reference_capture_id": row["reference_capture_id"],
+                "retry_of_capture_id": row["retry_of_capture_id"],
                 "frames": frames,
                 "result": row["result"],
                 "error": row["error"],
@@ -143,6 +148,8 @@ class Repository:
                 "state",
                 "recovery_required",
                 "created_at",
+                "recipe_snapshot",
+                "campaign_id",
             )
         }
         for field, key in (
@@ -165,6 +172,12 @@ class Repository:
             "session_id = %s",
             (session_id,),
         ).fetchone()
+        result["review"] = None
+        if result["pair"] is not None:
+            result["review"] = connection.execute(
+                "SELECT status,version,reason,updated_at FROM counterpart_pair_reviews WHERE pair_id=%s",
+                (result["pair"]["id"],),
+            ).fetchone() or {"status": "pending", "version": 0, "reason": "", "updated_at": None}
         events = connection.execute(
             "SELECT id, kind, data, created_at FROM counterpart_events WHERE session_id = %s "
             "ORDER BY id DESC LIMIT 50",
@@ -173,21 +186,86 @@ class Repository:
         result["events"] = list(reversed(events))
         return _json(result)
 
-    def create_session(self, recipe: str, mode: str, object_a: str, object_b: str) -> dict:
+    def _create_session(
+        self,
+        connection,
+        recipe: str,
+        mode: str,
+        object_a: str,
+        object_b: str,
+        *,
+        recipe_snapshot: dict | None = None,
+        campaign_id: str | None = None,
+        session_id: str | None = None,
+        token: str | None = None,
+    ) -> dict:
+        """Create on a caller-owned transaction so quota admission is atomic."""
+        from .recipes import RecipeContractError, build_recipe_snapshot, validate_recipe_snapshot
+
         if recipe not in {"spatial", "temporal"} or mode not in {"live", "replay"}:
             raise Conflict("invalid_session", "Unsupported recipe or collection mode")
-        if not object_a or not object_b or object_a == object_b:
-            raise Conflict("invalid_objects", "Choose two distinguishable object classes")
-        session_id, token = str(uuid4()), secrets.token_urlsafe(32)
-        digest = hashlib.sha256(token.encode()).hexdigest()
-        with self._connection() as connection:
-            connection.execute(
-                "INSERT INTO counterpart_sessions (id, capability_hash, recipe, mode, object_a, object_b) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
-                (session_id, digest, recipe, mode, object_a, object_b),
+        try:
+            frozen = (
+                build_recipe_snapshot(recipe, object_a, object_b)
+                if recipe_snapshot is None
+                else validate_recipe_snapshot(recipe_snapshot)
             )
-            self._event(connection, session_id, "session_created", mode=mode)
-            return {"token": token, "session": self._snapshot(connection, session_id)}
+        except RecipeContractError as error:
+            raise Conflict("invalid_objects", str(error)) from error
+        if (frozen["recipe"], frozen["object_a"], frozen["object_b"]) != (recipe, object_a, object_b):
+            raise Conflict("recipe_mismatch", "Frozen recipe does not match this session")
+        session_id, token = session_id or str(uuid4()), token or secrets.token_urlsafe(32)
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        connection.execute(
+            "INSERT INTO counterpart_sessions "
+            "(id, capability_hash, recipe, mode, object_a, object_b,recipe_snapshot,campaign_id) "
+            "VALUES (%s, %s, %s, %s, %s, %s,%s,%s)",
+            (session_id, digest, recipe, mode, object_a, object_b, Jsonb(frozen), campaign_id),
+        )
+        self._event(connection, session_id, "session_created", mode=mode, campaign_id=campaign_id)
+        return {"token": token, "session": self._snapshot(connection, session_id)}
+
+    def create_session(self, recipe: str, mode: str, object_a: str, object_b: str) -> dict:
+        with self._connection() as connection:
+            return self._create_session(connection, recipe, mode, object_a, object_b)
+
+    def evaluation_snapshot(self, session_id: str) -> dict:
+        """Complete historical evidence; never substitute only the latest attempt."""
+        with self._connection() as connection:
+            connection.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            session = self._session(connection, session_id)
+            rows = connection.execute(
+                "SELECT id FROM counterpart_captures WHERE session_id=%s ORDER BY created_at,id",
+                (session_id,),
+            ).fetchall()
+            return _json(
+                {
+                    "schema_version": "counterpart.evaluation.session.v1",
+                    "session_id": str(session["id"]),
+                    "recipe": session["recipe"],
+                    "mode": session["mode"],
+                    "recipe_snapshot": session["recipe_snapshot"],
+                    "captures_complete": True,
+                    "provenance": {
+                        "evidence_kind": "fixture_replay"
+                        if session["mode"] == "replay"
+                        else "roboflow_capture",
+                        "legacy_recipe_snapshot_missing": session["recipe_snapshot"] is None,
+                    },
+                    "captures": [self._capture(connection, row["id"]) for row in rows],
+                    "pairs": [
+                        row["manifest"]
+                        for row in connection.execute(
+                            "SELECT manifest FROM counterpart_pairs WHERE session_id=%s", (session_id,)
+                        ).fetchall()
+                    ],
+                    "events": connection.execute(
+                        "SELECT id,kind,data,created_at FROM counterpart_events "
+                        "WHERE session_id=%s ORDER BY id",
+                        (session_id,),
+                    ).fetchall(),
+                }
+            )
 
     def authenticate(self, session_id: str, token: str) -> bool:
         if not isinstance(token, str):
@@ -245,106 +323,224 @@ class Repository:
 
     def submit(self, session_id: str, metadata: dict, frames: list[dict], fingerprint: str) -> dict:
         with self._connection() as connection:
-            session = self._session(connection, session_id, lock=True)
+            return self._submit(connection, session_id, metadata, frames, fingerprint)
+
+    def check_new_capture_admission(self, session_id: str, idempotency_key: str) -> None:
+        """Avoid new orphan media for paused collections; commit rechecks authoritatively.
+
+        Already recorded keys continue to the fingerprint check so paused callers
+        can still recover a lost acknowledgement without inventing a new capture.
+        """
+        with self._connection() as connection:
+            session = self._session(connection, session_id)
             previous = connection.execute(
-                "SELECT id, fingerprint FROM counterpart_captures WHERE session_id = %s AND "
-                "idempotency_key = %s",
-                (session_id, metadata["idempotency_key"]),
+                "SELECT id FROM counterpart_captures WHERE session_id=%s AND idempotency_key=%s",
+                (session_id, idempotency_key),
             ).fetchone()
-            if previous is not None:
-                if previous["fingerprint"] != fingerprint:
-                    raise Conflict("idempotency_mismatch", "This retry key belongs to a different capture")
-                return {
-                    "capture": self._capture(connection, previous["id"]),
-                    "session": self._snapshot(connection, session_id),
-                }
-            if session["state"] == "published":
-                raise Conflict("already_published", "This pair is already published")
-            if metadata["expected_revision"] != session["revision"]:
-                raise Conflict("stale_revision", "A newer capture already changed this session")
-            if metadata["epoch"] != session["epoch"]:
-                raise Conflict("stale_epoch", "Reconnect before submitting another observation")
-            slot = metadata["slot"]
-            if slot not in {"baseline", "counterpart", "preview", "recovery"}:
-                raise Conflict("invalid_slot", "Unknown capture slot")
-            if slot in COMMITTED_SLOTS and session["recovery_required"]:
-                raise Conflict("recovery_required", "Check the scene again before continuing")
-            if slot in {"counterpart", "recovery"} and session["baseline_id"] is None:
-                raise Conflict("baseline_required", "Capture an accepted first observation first")
-            if slot == "preview" and metadata.get("client_seq", 0) <= session["latest_preview_seq"]:
-                raise Conflict("stale_preview", "This preview has already been replaced")
-            # Serialize only admission accounting, not processing, across sessions.
-            connection.execute("SELECT pg_advisory_xact_lock(780245190221)")
-            pending = connection.execute(
-                "SELECT count(*) AS n FROM counterpart_jobs WHERE status IN "
-                "('pending','running','retry_wait')"
+            if previous or not session.get("campaign_id"):
+                return
+            campaign = connection.execute(
+                "SELECT active FROM counterpart_campaigns WHERE id=%s", (session["campaign_id"],)
+            ).fetchone()
+            if campaign is None or not campaign["active"]:
+                raise Conflict("collection_paused", "This collection is paused. Saved evidence is retained.")
+
+    def _submit(
+        self,
+        connection,
+        session_id: str,
+        metadata: dict,
+        frames: list[dict],
+        fingerprint: str,
+        *,
+        saved_epoch: int | None = None,
+    ) -> dict:
+        session = self._session(connection, session_id, lock=True)
+        previous = connection.execute(
+            "SELECT id, fingerprint FROM counterpart_captures WHERE session_id = %s AND idempotency_key = %s",
+            (session_id, metadata["idempotency_key"]),
+        ).fetchone()
+        if previous is not None:
+            if previous["fingerprint"] != fingerprint:
+                raise Conflict("idempotency_mismatch", "This retry key belongs to a different capture")
+            return {
+                "capture": self._capture(connection, previous["id"]),
+                "session": self._snapshot(connection, session_id),
+            }
+        if session["campaign_id"] is not None:
+            # A pause and a submission serialize on the collection row. A
+            # previously admitted attempt may finish; no new work sneaks past
+            # an API-only preflight, and duplicate receipts remain readable.
+            campaign = connection.execute(
+                "SELECT active FROM counterpart_campaigns WHERE id=%s FOR SHARE",
+                (session["campaign_id"],),
+            ).fetchone()
+            if campaign is None or not campaign["active"]:
+                raise Conflict(
+                    "collection_paused", "This collection is paused; saved evidence remains available"
+                )
+        if session["state"] == "published":
+            raise Conflict("already_published", "This pair is already published")
+        if metadata["expected_revision"] != session["revision"]:
+            raise Conflict("stale_revision", "A newer capture already changed this session")
+        if metadata["epoch"] != session["epoch"]:
+            raise Conflict("stale_epoch", "Reconnect before submitting another observation")
+        slot = metadata["slot"]
+        if slot not in {"baseline", "counterpart", "preview", "recovery"}:
+            raise Conflict("invalid_slot", "Unknown capture slot")
+        if slot in COMMITTED_SLOTS and session["recovery_required"] and saved_epoch is None:
+            raise Conflict("recovery_required", "Check the scene again before continuing")
+        if slot in {"counterpart", "recovery"} and session["baseline_id"] is None:
+            raise Conflict("baseline_required", "Capture an accepted first observation first")
+        if slot == "preview" and metadata.get("client_seq", 0) <= session["latest_preview_seq"]:
+            raise Conflict("stale_preview", "This preview has already been replaced")
+        # Serialize only admission accounting, not processing, across sessions.
+        connection.execute("SELECT pg_advisory_xact_lock(780245190221)")
+        pending = connection.execute(
+            "SELECT count(*) AS n FROM counterpart_jobs WHERE status IN ('pending','running','retry_wait')"
+        ).fetchone()["n"]
+        if pending >= MAX_PENDING_JOBS:
+            replaceable = connection.execute(
+                "SELECT count(*) AS n FROM counterpart_jobs j JOIN counterpart_captures c ON "
+                "c.id=j.capture_id "
+                "WHERE j.session_id=%s AND j.status IN ('pending','retry_wait') AND c.slot=%s",
+                (session_id, slot),
             ).fetchone()["n"]
-            if pending >= MAX_PENDING_JOBS:
-                replaceable = connection.execute(
-                    "SELECT count(*) AS n FROM counterpart_jobs j JOIN counterpart_captures c ON "
-                    "c.id=j.capture_id "
-                    "WHERE j.session_id=%s AND j.status IN ('pending','retry_wait') AND c.slot=%s",
-                    (session_id, slot),
-                ).fetchone()["n"]
-                if not replaceable:
-                    raise CapacityExceeded()
-            revision = session["revision"] + (1 if slot in COMMITTED_SLOTS else 0)
-            if slot in COMMITTED_SLOTS:
-                self._supersede(connection, session_id, ("baseline", "counterpart", "recovery"))
-            elif slot in {"preview", "recovery"}:
-                self._supersede(connection, session_id, (slot,), pending_only=slot == "preview")
-            capture_id, job_id = str(uuid4()), str(uuid4())
-            connection.execute(
-                "INSERT INTO counterpart_captures "
-                "(id, session_id, idempotency_key, fingerprint, slot, revision, epoch, client_seq, "
-                "frames, interrupted) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (
-                    capture_id,
-                    session_id,
-                    metadata["idempotency_key"],
-                    fingerprint,
-                    slot,
-                    revision,
-                    session["epoch"],
-                    metadata.get("client_seq", 0),
-                    Jsonb(frames),
-                    metadata.get("interrupted", False),
-                ),
-            )
-            connection.execute(
-                "INSERT INTO counterpart_jobs (id,capture_id,session_id) VALUES (%s,%s,%s)",
-                (job_id, capture_id, session_id),
-            )
-            if slot in COMMITTED_SLOTS:
-                if slot == "baseline":
-                    connection.execute(
-                        "UPDATE counterpart_sessions SET revision=%s,latest_capture_id=%s,baseline_id=NULL, "
-                        "counterpart_id=NULL,state='collecting' WHERE id=%s",
-                        (revision, capture_id, session_id),
-                    )
-                else:
-                    connection.execute(
-                        "UPDATE counterpart_sessions SET revision=%s,latest_capture_id=%s, "
-                        "counterpart_id=NULL,state='baseline_ready' WHERE id=%s",
-                        (revision, capture_id, session_id),
-                    )
-                self._supersede(connection, session_id, ("preview",), pending_only=True)
-            elif slot == "preview":
+            if not replaceable:
+                raise CapacityExceeded()
+        revision = session["revision"] + (1 if slot in COMMITTED_SLOTS else 0)
+        if slot in COMMITTED_SLOTS:
+            self._supersede(connection, session_id, ("baseline", "counterpart", "recovery"))
+        elif slot in {"preview", "recovery"}:
+            self._supersede(connection, session_id, (slot,), pending_only=slot == "preview")
+        capture_id, job_id = str(uuid4()), str(uuid4())
+        connection.execute(
+            "INSERT INTO counterpart_captures "
+            "(id, session_id, idempotency_key, fingerprint, slot, revision, epoch, client_seq, "
+            "frames, interrupted,reference_capture_id) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (
+                capture_id,
+                session_id,
+                metadata["idempotency_key"],
+                fingerprint,
+                slot,
+                revision,
+                session["epoch"] if saved_epoch is None else saved_epoch,
+                metadata.get("client_seq", 0),
+                Jsonb(frames),
+                metadata.get("interrupted", False),
+                session["baseline_id"] if slot != "baseline" else None,
+            ),
+        )
+        connection.execute(
+            "INSERT INTO counterpart_jobs (id,capture_id,session_id) VALUES (%s,%s,%s)",
+            (job_id, capture_id, session_id),
+        )
+        if slot in COMMITTED_SLOTS:
+            if slot == "baseline":
                 connection.execute(
-                    "UPDATE counterpart_sessions SET latest_preview_seq=%s WHERE id=%s",
-                    (metadata.get("client_seq", 0), session_id),
+                    "UPDATE counterpart_sessions SET revision=%s,latest_capture_id=%s,baseline_id=NULL, "
+                    "counterpart_id=NULL,state='collecting' WHERE id=%s",
+                    (revision, capture_id, session_id),
                 )
             else:
                 connection.execute(
-                    "UPDATE counterpart_sessions SET latest_capture_id=%s WHERE id=%s",
-                    (capture_id, session_id),
+                    "UPDATE counterpart_sessions SET revision=%s,latest_capture_id=%s, "
+                    "counterpart_id=NULL,state='baseline_ready' WHERE id=%s",
+                    (revision, capture_id, session_id),
                 )
-            self._event(connection, session_id, "capture_submitted", capture_id=capture_id, slot=slot)
-            return {
-                "capture": self._capture(connection, capture_id),
-                "session": self._snapshot(connection, session_id),
-            }
+            self._supersede(connection, session_id, ("preview",), pending_only=True)
+        elif slot == "preview":
+            connection.execute(
+                "UPDATE counterpart_sessions SET latest_preview_seq=%s WHERE id=%s",
+                (metadata.get("client_seq", 0), session_id),
+            )
+        else:
+            connection.execute(
+                "UPDATE counterpart_sessions SET latest_capture_id=%s WHERE id=%s",
+                (capture_id, session_id),
+            )
+        self._event(connection, session_id, "capture_submitted", capture_id=capture_id, slot=slot)
+        return {
+            "capture": self._capture(connection, capture_id),
+            "session": self._snapshot(connection, session_id),
+        }
+
+    def retry_capture(
+        self,
+        session_id: str,
+        capture_id: str,
+        expected_revision: int,
+        epoch: int,
+        idempotency_key: str,
+    ) -> dict:
+        """Reverify immutable failed evidence, never a newly sampled camera frame.
+
+        The original attempt remains failed. A new fenced attempt links back to
+        it, and retains its physical capture epoch so recovery is not invented.
+        """
+        if not re.fullmatch(r"[a-zA-Z0-9_.-]{8,128}", idempotency_key):
+            raise Conflict("invalid_retry_key", "Use a new valid retry key")
+        fingerprint = hashlib.sha256(
+            json.dumps({"retry_of": capture_id, "session_id": session_id}, sort_keys=True).encode()
+        ).hexdigest()
+        with self._connection() as connection:
+            session = self._session(connection, session_id, lock=True)
+            prior = connection.execute(
+                "SELECT id,fingerprint FROM counterpart_captures WHERE session_id=%s AND idempotency_key=%s",
+                (session_id, idempotency_key),
+            ).fetchone()
+            if prior:
+                if prior["fingerprint"] != fingerprint:
+                    raise Conflict("idempotency_mismatch", "This retry key belongs to another capture")
+                return {
+                    "capture": self._capture(connection, prior["id"]),
+                    "session": self._snapshot(connection, session_id),
+                }
+            try:
+                capture_id = str(UUID(str(capture_id)))
+            except (ValueError, TypeError, AttributeError) as error:
+                raise NotFound("Capture not found") from error
+            original = connection.execute(
+                "SELECT * FROM counterpart_captures WHERE id=%s AND session_id=%s",
+                (capture_id, session_id),
+            ).fetchone()
+            if original is None:
+                raise NotFound("Capture not found")
+            if original["status"] != "failed" or original["slot"] not in COMMITTED_SLOTS:
+                raise Conflict("capture_not_retryable", "Only failed saved observations can be retried")
+            if str(session["latest_capture_id"]) != capture_id:
+                raise Conflict("stale_capture", "A newer observation has replaced this failed attempt")
+            result = self._submit(
+                connection,
+                session_id,
+                {
+                    "slot": original["slot"],
+                    "expected_revision": expected_revision,
+                    "epoch": epoch,
+                    "idempotency_key": idempotency_key,
+                    "client_seq": original["client_seq"],
+                    "interrupted": original["interrupted"],
+                },
+                original["frames"],
+                fingerprint,
+                saved_epoch=original["epoch"],
+            )
+            connection.execute(
+                "UPDATE counterpart_captures SET retry_of_capture_id=%s WHERE id=%s",
+                (capture_id, result["capture"]["id"]),
+            )
+            self._event(
+                connection,
+                session_id,
+                "saved_capture_retried",
+                retry_of=capture_id,
+                capture_id=result["capture"]["id"],
+            )
+            result["session"] = self._snapshot(connection, session_id)
+            result["capture"] = self._capture(connection, result["capture"]["id"])
+            return result
 
     def claim(self, worker_id: str, lease_seconds: float = 90) -> dict | None:
         self._validate_lease(lease_seconds)
@@ -596,8 +792,9 @@ class Repository:
                 ),
             )
             connection.execute(
-                "UPDATE counterpart_captures SET status=%s,error=%s WHERE id=%s",
-                ("queued" if retry else "failed", code, job["capture_id"]),
+                "UPDATE counterpart_captures SET status=%s,error=%s,"
+                "completed_at=CASE WHEN %s THEN NULL ELSE clock_timestamp() END WHERE id=%s",
+                ("queued" if retry else "failed", code, retry, job["capture_id"]),
             )
             self._event(
                 connection,
@@ -651,6 +848,8 @@ class Repository:
                 "mode": session["mode"],
                 "revision": session["revision"],
                 "objects": {"a": session["object_a"], "b": session["object_b"]},
+                "recipe_snapshot": session["recipe_snapshot"],
+                "campaign_id": str(session["campaign_id"]) if session["campaign_id"] else None,
                 "split_group": session_id,
                 "split": split_for_session(session_id),
                 "baseline": self._capture(connection, session["baseline_id"], internal=True),
@@ -658,17 +857,18 @@ class Repository:
                 "provenance": {
                     "evidence_kind": "fixture_replay" if session["mode"] == "replay" else "roboflow_capture",
                     "human_reviewed": False,
+                    "legacy_recipe_snapshot_missing": session["recipe_snapshot"] is None,
                 },
             }
             # Fixtures remain labeled, and may never enqueue real dataset uploads.
-            export_status = "disabled_replay" if session["mode"] == "replay" else "pending"
+            export_status = "disabled_replay" if session["mode"] == "replay" else "local_only"
             connection.execute(
                 "INSERT INTO counterpart_pairs (id,session_id,manifest,export_status) VALUES (%s,%s,%s,%s)",
                 (pair_id, session_id, Jsonb(manifest), export_status),
             )
             connection.execute(
                 "INSERT INTO counterpart_export_intents (id,pair_id,status) VALUES (%s,%s,%s)",
-                (str(uuid4()), pair_id, "disabled" if session["mode"] == "replay" else "pending"),
+                (str(uuid4()), pair_id, "disabled"),
             )
             connection.execute("UPDATE counterpart_sessions SET state='published' WHERE id=%s", (session_id,))
             self._supersede(connection, session_id, ("preview", "recovery"))
@@ -692,7 +892,8 @@ class Repository:
                 "WHERE ((e.status='pending' AND e.available_at<=clock_timestamp()) OR "
                 "(e.status='running' AND "
                 "e.lease_expires_at<=clock_timestamp())) "
-                "AND p.manifest->>'mode'='live' ORDER BY e.updated_at,e.id FOR UPDATE OF e SKIP "
+                "AND p.manifest->>'mode'='live' AND e.destination IS NOT NULL "
+                "ORDER BY e.updated_at,e.id FOR UPDATE OF e SKIP "
                 "LOCKED LIMIT 1"
             ).fetchone()
             if row is None:
@@ -713,6 +914,7 @@ class Repository:
                     "lease_token": token,
                     "manifest": row["manifest"],
                     "receipts": row["receipts"],
+                    "destination": row["destination"],
                     "attempt": row["attempt"] + 1,
                 }
             )

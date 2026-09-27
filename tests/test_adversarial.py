@@ -514,3 +514,58 @@ Worker(Repository(config.database_url), MediaStore(config.media_dir), config,
     assert repo.metrics()["budget_reservations"] == [{"provider": "roboflow", "reserved_units": 2}]
     assert repo.heartbeat(str(original[0]), str(original[1])) is False
     assert not replacement.once()
+
+
+@pytest.mark.postgres
+def test_worker_rejects_changed_frozen_recipe_before_provider_dispatch(adversarial_repo, tmp_path):
+    from counterpart.config import Settings
+    from counterpart.storage import MediaStore
+    from counterpart.worker import Worker
+
+    repo = adversarial_repo
+    session = repo.create_session("spatial", "live", "bottle", "cup")["session"]
+    _submit(repo, session, "baseline")
+    with psycopg.connect(repo.dsn) as connection:
+        connection.execute(
+            "UPDATE counterpart_sessions SET recipe_snapshot=jsonb_set(recipe_snapshot,"
+            "'{recipe_version}','\"999.0.0\"') WHERE id=%s",
+            (session["id"],),
+        )
+
+    class MustNotDispatch:
+        def detect(self, *_):
+            pytest.fail("An incompatible recipe cannot dispatch inference")
+
+    config = Settings(database_url=repo.dsn, media_dir=tmp_path / "media", live_enabled=True)
+    assert Worker(repo, MediaStore(config.media_dir), config, MustNotDispatch()).once()
+    saved = repo.snapshot(session["id"])
+    assert saved["latest_capture"]["status"] == "failed"
+    assert saved["latest_capture"]["error"] == "unsupported_recipe"
+    assert repo.metrics()["budget_reservations"] == []
+
+
+@pytest.mark.postgres
+def test_worker_retries_transient_shared_storage_outage_without_spending(adversarial_repo, tmp_path):
+    from counterpart.config import Settings
+    from counterpart.object_storage import MediaUnavailable
+    from counterpart.worker import Worker
+
+    repo = adversarial_repo
+    session = repo.create_session("spatial", "live", "bottle", "cup")["session"]
+    _submit(repo, session, "baseline")
+
+    class UnavailableStorage:
+        def read(self, *_):
+            raise MediaUnavailable("Evidence storage could not read this asset.")
+
+    class MustNotDispatch:
+        def detect(self, *_):
+            pytest.fail("No provider dispatch before immutable media is available")
+
+    config = Settings(database_url=repo.dsn, media_dir=tmp_path / "media", live_enabled=True)
+    assert Worker(repo, UnavailableStorage(), config, MustNotDispatch()).once()
+    saved = repo.snapshot(session["id"])
+    assert saved["latest_capture"]["status"] == "queued"
+    assert saved["latest_capture"]["error"] == "media_unavailable"
+    assert repo.metrics()["jobs"] == {"retry_wait": 1}
+    assert repo.metrics()["budget_reservations"] == []

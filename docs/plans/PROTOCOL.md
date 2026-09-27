@@ -1,6 +1,6 @@
 # API and module contract v1
 
-All session routes use `Authorization: Bearer <session capability>` except session creation. JSON errors use `{detail: {code, message}}` where feasible. JSON dates are ISO UTC. UUIDs are strings. Coordinates are normalized xyxy in [0,1]. Frame timestamps are finite monotonic milliseconds from the local capture start; they are not synchronized wall clock.
+All session routes use `Authorization: Bearer <session capability>` except session creation, which requires operator authentication when public mode is enabled. JSON errors use `{detail: {code, message}}` where feasible. JSON dates are ISO UTC. UUIDs are strings. Coordinates are normalized xyxy in [0,1]. Frame timestamps are finite monotonic milliseconds from the local capture start; they are not synchronized wall clock.
 
 ## Domain module contract (verification.py)
 
@@ -51,4 +51,18 @@ Repository raises `Conflict(code,message)`, `NotFound`, `CapacityExceeded` (defi
 
 Implemented synchronous `RoboflowExporter(api_key,workspace,project,timeout=30,client=None)` exposes `upload(image_bytes,asset_id,pair_id,session_id,split,media_type)`, `reconcile(asset_id,media_sha256,expected_pair_id,expected_session_id,expected_split)` and `annotate(image_id,detections,width,height)` using keyword parameters as defined in source. Annotations are VOC predictions, never implicitly human ground truth. Dataset query-key auth is a documented narrow exception with redacted logs and sanitized errors. No default project creation or camera export.
 
-`ExportWorker.once()` uses `export_claim`, fenced `export_record_asset`, `export_heartbeat` and `export_finish(...,delay_seconds=...)`. One external operation per iteration; missing search results receive persisted bounded read-only backoff, incompatible results stop as uncertain. Local manifests now include a deterministic session-level split, and downloaded ZIPs also contain `examples.jsonl` with machine-verified VQA rows derived from recorded decisions. Actual setup/evidence is in EXECUTION_STATUS.md.
+`ExportWorker.once()` uses `export_claim`, fenced `export_record_asset`, `export_heartbeat` and `export_finish(...,delay_seconds=...)`. At most one publication operation plus one read-only privacy check per iteration; missing search results receive persisted bounded read-only backoff, incompatible results stop as uncertain. Local manifests now include a deterministic session-level split, and downloaded ZIPs also contain `examples.jsonl` with machine-verified VQA rows derived from recorded decisions. Actual setup/evidence is in EXECUTION_STATUS.md.
+
+## Full-product extension
+
+`operator_api.py` is the typed HTTP source of truth; `CollectionRepository` contracts are documented in [COLLECTIONS.md](COLLECTIONS.md). All `/api/operator/*` routes require a signed operator cookie except session/login/logout and strictly local bootstrap. Mutations enforce configured browser origins and trusted hosts.
+
+- Operator campaigns support create/list/read, activity pause/resume, bounded invitations, sessions, pair review/history, immutable releases and explicit destination-bound batch export.
+- Collector invitation info/join takes the invitation secret in a POST body; share links carry it in the browser fragment. Idempotent lost-response joins reuse the same session capability.
+- `POST /api/sessions/{id}/retry` re-verifies saved failed evidence under the current revision/epoch; it does not read the camera.
+- Session snapshots add frozen `recipe_snapshot`, `campaign_id`, frame progress and current `review` feedback. The published manifest stays immutable as review changes.
+- `/api/operator/runtime` reports jobs/reservations/cache counters and worker liveness; liveness does not promise available credit or correct model responses.
+- `/api/operator/pairs/{id}/export` reports receipt states; POST `.../export/recheck` starts only a permitted bounded reconciliation cycle. It cannot prove or repeat an ambiguous annotation write.
+- Portable pair/release archives are bounded, disk-spooled ZIPs with original media and exact JSONL; [DATASET_FORMAT.md](../DATASET_FORMAT.md) defines the independently validated consumer contract.
+
+A provider or storage failure is not a negative physical label. API503 maintenance responses preserve the saved upload for retry. Campaign pause is checked before new media writes and again at transactional admission; already recorded request identities still recover their original receipts.

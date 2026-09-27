@@ -1,0 +1,71 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { Capture } from './api';
+import { EvidenceMedia } from './Evidence';
+import { operatorBlob, saveBlob } from './api';
+import { Alert } from './Shell';
+import Invites from './Invites';
+import PairReview from './PairReview';
+import { formatDate, humanName, jsonPost, messageOf, nameOfRecipe, operator, reviewName } from './productApi';
+import type { Campaign, CollectionSession, Destination, Invite, PairRecord, Release, ReviewStatus } from './productApi';
+
+type Tab = 'pairs' | 'sessions' | 'sharing' | 'releases';
+function SessionInspector({ session, close }: { session: Record<string, unknown>; close: () => void }) {
+  const id = String(session.id);
+  const loadAsset = useCallback((assetId: string) => operatorBlob(`/sessions/${id}/assets/${encodeURIComponent(assetId)}`), [id]);
+  const raw = Array.isArray(session.captures) ? session.captures : [session.baseline, session.counterpart, session.latest_capture].filter(Boolean);
+  const captures = [...new Map((raw as Capture[]).map(capture => [capture.id, capture])).values()];
+  return <section className="session-inspector"><div className="panel-heading"><h3>Session {id.slice(0, 8)}</h3><button className="text-button" onClick={close}>Close</button></div><p>Saved state: {humanName(String(session.state))} · revision {String(session.revision)} · epoch {String(session.epoch)}</p>{Boolean(session.recovery_required) && <p className="inline-warning">The collector must recheck the scene before continuing.</p>}<div className="session-captures">{captures.map(capture => <article key={capture.id}><div className="pair-label"><strong>{humanName(capture.slot)}</strong><span className={`tag ${capture.status}`}>{humanName(capture.status)}</span></div><EvidenceMedia capture={capture} scope={`operator-session:${id}`} loadAsset={loadAsset} labels={[String(session.object_a), String(session.object_b)]}/><p>{capture.result?.message || capture.error || 'Waiting for verification.'}</p></article>)}</div><details><summary>Technical session record</summary><pre>{JSON.stringify(session, null, 2)}</pre></details></section>;
+}
+
+export default function CollectionDetail({ initial, onBack }: { initial: Campaign; onBack: () => void }) {
+  const [campaign, setCampaign] = useState(initial);
+  const [pairs, setPairs] = useState<PairRecord[]>([]);
+  const [sessions, setSessions] = useState<CollectionSession[]>([]);
+  const [invites, setInvites] = useState<Invite[]>([]);
+  const [releases, setReleases] = useState<Release[]>([]);
+  const [destination, setDestination] = useState<Destination | null>(null);
+  const [tab, setTab] = useState<Tab>('pairs');
+  const [filter, setFilter] = useState<ReviewStatus | 'all'>('all');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [reviewId, setReviewId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [allowReplayRelease, setAllowReplayRelease] = useState(false);
+  const [sessionDetail, setSessionDetail] = useState<Record<string, unknown> | null>(null);
+  const active = useRef(true);
+  const locked = useRef(false);
+  const refresh = useCallback(async () => {
+    const response = await Promise.all([
+      operator<Campaign>(`/campaigns/${initial.id}`), operator<{ pairs: PairRecord[] }>(`/campaigns/${initial.id}/pairs`),
+      operator<{ sessions: CollectionSession[] }>(`/campaigns/${initial.id}/sessions`), operator<{ invites: Invite[] }>(`/campaigns/${initial.id}/invites`),
+      operator<{ releases: Release[] }>(`/campaigns/${initial.id}/releases`),
+    ]);
+    if (active.current) { setCampaign(response[0]); setPairs(response[1].pairs); setSessions(response[2].sessions); setInvites(response[3].invites); setReleases(response[4].releases); }
+  }, [initial.id]);
+  useEffect(() => {
+    active.current = true; let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => { try { if (!locked.current) await refresh(); } catch (cause) { if (active.current) setError(messageOf(cause)); } finally { if (active.current) timer = setTimeout(poll, 4000); } };
+    void poll(); void operator<Destination>('/destination').then(value => { if (active.current) setDestination(value); }).catch(() => undefined);
+    return () => { active.current = false; clearTimeout(timer); };
+  }, [refresh]);
+  const act = async (task: () => Promise<void>) => { if (locked.current) return; locked.current = true; setBusy(true); setError(null); setNotice(null); try { await task(); await refresh(); } catch (cause) { setError(messageOf(cause)); } finally { setBusy(false); locked.current = false; } };
+  const approved = pairs.filter(pair => selected.has(pair.id) && pair.review.status === 'approved');
+  const review = pairs.find(pair => pair.id === reviewId);
+  const filtered = pairs.filter(pair => filter === 'all' || pair.review.status === filter);
+  const release = () => act(async () => {
+    const result = await operator<Release>(`/campaigns/${campaign.id}/releases`, jsonPost({ pair_ids: approved.map(pair => pair.id), include_replay: allowReplayRelease, idempotency_key: crypto.randomUUID() }));
+    setTab('releases'); setNotice(`Release ${result.id.slice(0, 8)} is frozen with ${result.pair_count} approved pairs. Its membership stays fixed when reviews change.`);
+  });
+  return <main className="product-main"><button className="text-button back-link" onClick={onBack}>← All collections</button><div className="page-heading collection-page-heading"><div><p className="eyebrow">{nameOfRecipe(campaign.recipe).toUpperCase()} / {campaign.object_a.toUpperCase()} + {campaign.object_b.toUpperCase()}</p><h1>{campaign.name}<span>.</span></h1><p>{campaign.mode === 'live' ? 'Real observations, reviewed before release.' : 'Labeled test replay. Exercises collection without model calls.'}</p></div><div className="quota-summary"><strong>{campaign.progress.approved_pairs}<span> / {campaign.target_pairs}</span></strong><span>approved pairs</span><progress aria-label="Collection approved-pair progress" value={campaign.progress.approved_pairs} max={campaign.target_pairs}/></div></div>
+    <div className="collection-activity"><span className={`tag ${campaign.active === false ? 'needs_revision' : 'approved'}`}>{campaign.active === false ? 'Collection paused' : 'Open for collection'}</span><button className="text-button" disabled={busy} onClick={() => void act(async () => { await operator(`/campaigns/${campaign.id}/activity`, jsonPost({ active: campaign.active === false })); })}>{campaign.active === false ? 'Resume collection' : 'Pause collection'}</button><span>Pausing stops new captures; saved evidence remains available.</span></div><div className="collection-tabs" role="tablist" aria-label="Collection views">{(['pairs', 'sessions', 'sharing', 'releases'] as Tab[]).map(value => <button key={value} role="tab" aria-selected={tab === value} onClick={() => { setTab(value); setReviewId(null); }}>{value === 'pairs' ? `Review pairs (${pairs.length})` : value === 'sessions' ? `Sessions (${sessions.length})` : value === 'sharing' ? 'Invite collectors' : `Releases (${releases.length})`}</button>)}</div><Alert message={error} dismiss={() => setError(null)}/>{notice && <div className="global-message notice" role="status"><p>{notice}</p></div>}
+    {tab === 'pairs' && <section aria-label="Pair library">{review ? <PairReview key={review.id} campaignId={campaign.id} pair={review} onReviewed={refresh} onClose={() => setReviewId(null)}/> : <>
+      <div className="library-toolbar"><div className="review-filters" aria-label="Filter pair review status">{(['all', 'pending', 'approved', 'needs_revision', 'rejected'] as const).map(value => <button aria-pressed={filter === value} onClick={() => setFilter(value)} key={value}>{value === 'all' ? 'All pairs' : reviewName(value)}</button>)}</div><button className="text-button" onClick={() => setSelected(new Set(pairs.filter(pair => pair.review.status === 'approved').map(pair => pair.id)))}>Select approved</button></div>
+      {filtered.length ? <div className="pair-library">{filtered.map(pair => <article className={`pair-row ${selected.has(pair.id) ? 'selected' : ''}`} key={pair.id}><label className="pair-selection"><input type="checkbox" aria-label={`Select pair ${pair.id.slice(0, 8)}`} checked={selected.has(pair.id)} disabled={pair.review.status !== 'approved'} onChange={event => setSelected(current => { const next = new Set(current); if (event.target.checked) next.add(pair.id); else next.delete(pair.id); return next; })}/></label><div className="pair-mark" aria-hidden="true">{pair.manifest.recipe === 'spatial' ? '⇄' : 'AB BA'}</div><div className="pair-row-info"><strong>{humanName(pair.manifest.objects.a)} + {pair.manifest.objects.b}</strong><p>{pair.id.slice(0, 8)} · {formatDate(pair.created_at)} · {pair.manifest.split}</p><span className={`tag ${pair.review.status}`}>{reviewName(pair.review.status)}</span>{pair.manifest.mode === 'replay' && <span className="tag fixture">Test evidence</span>}</div><button className="secondary" onClick={() => setReviewId(pair.id)}>Review evidence ↗</button></article>)}</div> : <div className="empty-state"><h2>{pairs.length ? 'No pairs in this view.' : 'A good dataset starts with the first pair.'}</h2><p>{pairs.length ? 'Choose another review status.' : 'Create an invitation. Complete pairs arrive here for review.'}</p>{!pairs.length && <button className="secondary" onClick={() => setTab('sharing')}>Invite a collector ↗</button>}</div>}
+      {approved.length > 0 && <div className="release-bar"><div><strong>{approved.length} approved {approved.length === 1 ? 'pair' : 'pairs'} selected</strong><p>A release freezes membership, review decisions and split assignments.</p>{campaign.mode === 'replay' && <label className="checkbox-label"><input type="checkbox" checked={allowReplayRelease} onChange={event => setAllowReplayRelease(event.target.checked)}/>Create a labeled test release, excluded from real data.</label>}</div><button className="primary" disabled={busy || (campaign.mode === 'replay' && !allowReplayRelease)} onClick={release}>Create dataset release <span aria-hidden="true">↗</span></button></div>}
+    </>}</section>}
+    {tab === 'sessions' && <section aria-label="Collector sessions"><div className="section-lead"><h2>Every attempt has a place.</h2><p>Accepted captures survive interruptions. Completion and human review are separate states.</p></div>{sessions.length ? <div className="table-wrap"><table><thead><tr><th>Session</th><th>Progress</th><th>Attempts</th><th>Review</th><th/></tr></thead><tbody>{sessions.map(session => <tr key={session.id}><td><strong>{session.id.slice(0, 8)}</strong><small>{formatDate(session.created_at)}</small></td><td>{session.state === 'published' ? 'Complete pair' : humanName(session.state)}</td><td>{session.capture_count}<small>{session.failed_capture_count} failed checks</small></td><td>{session.review_status ? reviewName(session.review_status) : 'Not ready'}</td><td><button className="text-button" onClick={() => void act(async () => setSessionDetail(await operator<Record<string, unknown>>(`/sessions/${session.id}`)))}>Inspect</button></td></tr>)}</tbody></table></div> : <div className="empty-state"><h2>No collectors have started yet.</h2><button className="secondary" onClick={() => setTab('sharing')}>Create an invitation ↗</button></div>}{sessionDetail && <SessionInspector session={sessionDetail} close={() => setSessionDetail(null)}/>}</section>}
+    {tab === 'sharing' && <Invites campaign={campaign} invites={invites} act={act} busy={busy}/>}
+    {tab === 'releases' && <section aria-label="Dataset releases"><div className="section-lead"><h2>Data you can hand to training.</h2><p>Each release is an immutable selection of reviewed pairs. Original frames, decisions and pair-level split membership travel together.</p></div>{releases.length ? <div className="release-list">{releases.map(item => <article key={item.id}><div><span className="eyebrow">RELEASE / {item.id.slice(0, 8)}</span><h3>{item.pair_count} approved {item.pair_count === 1 ? 'pair' : 'pairs'}</h3><p>{formatDate(item.created_at)} · {item.split_counts.train} train / {item.split_counts.valid} valid / {item.split_counts.test} test</p></div><div className="button-row"><button className="primary" disabled={busy} onClick={() => void act(async () => saveBlob(await operatorBlob(`/releases/${item.id}/archive`), `counterpart-release-${item.id.slice(0, 8)}.zip`))}>Download dataset ZIP <span aria-hidden="true">↓</span></button><button className="text-button" onClick={() => void act(async () => saveBlob(await operatorBlob(`/releases/${item.id}/manifest`), `counterpart-release-${item.id.slice(0, 8)}.json`))}>Manifest JSON</button></div></article>)}</div> : <div className="empty-state"><h2>No dataset releases yet.</h2><p>Review pairs, select the approved ones, then create a release.</p><button className="secondary" onClick={() => setTab('pairs')}>Review pairs ↗</button></div>}<div className="destination-panel"><div><p className="eyebrow">OPTIONAL ROBOFLOW DESTINATION</p><h3>{destination?.enabled ? `${destination.workspace} / ${destination.project}` : 'Camera dataset export is not enabled.'}</h3><p>{destination?.enabled ? 'Approved live pairs can be sent to the verified private destination. Confirmed upload receipts are separate from local publication.' : destination?.reason && destination.reason.includes(' ') ? destination.reason : 'Download a local release, or configure a verified private Roboflow project for camera dataset export.'}</p></div>{destination?.enabled && <button className="secondary" disabled={busy || !approved.length || campaign.mode === 'replay'} onClick={() => void act(async () => { await operator(`/campaigns/${campaign.id}/exports`, jsonPost({ pair_ids: approved.map(pair => pair.id), destination_id: 'configured' })); setNotice('Selected pairs are queued for Roboflow export. Completion requires confirmed upload receipts.'); })}>Export {approved.length || 'selected'} approved pairs</button>}</div></section>}
+  </main>;
+}

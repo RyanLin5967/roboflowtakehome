@@ -17,8 +17,11 @@ from psycopg import sql
 from psycopg.conninfo import make_conninfo
 from psycopg.types.json import Jsonb
 
+from counterpart.collections import CollectionRepository
 from counterpart.config import Settings
+from counterpart.destination import DestinationResolver
 from counterpart.exporting import ExportWorker, export_split
+from counterpart.object_storage import MediaUnavailable
 from counterpart.providers import RoboflowExporter
 from counterpart.repository import Repository
 from counterpart.storage import MediaStore
@@ -27,7 +30,7 @@ pytestmark = pytest.mark.postgres
 
 
 @pytest.fixture
-def system(tmp_path):
+def system(tmp_path, monkeypatch, request):
     dsn = os.getenv("COUNTERPART_TEST_DSN", "postgresql:///counterpart_test")
     schema = "test_export_" + uuid4().hex
     try:
@@ -38,9 +41,14 @@ def system(tmp_path):
     scoped = make_conninfo(dsn, options=f"-c search_path={schema}")
     repo = Repository(scoped)
     repo.initialize()
+    collections = CollectionRepository(repo)
     media = MediaStore(tmp_path / "media")
     config = Settings(export_enabled=True, export_project="test-project", credentials_file=tmp_path / "none")
-    session = repo.create_session("spatial", "live", "bottle", "cup")["session"]
+    monkeypatch.setenv("ROBOFLOW_API_KEY", "only-a-test-key")
+    monkeypatch.setenv("ROBOFLOW_WORKSPACE", "test-workspace")
+    campaign = collections.create_campaign("Export transport fixture", "spatial", "live")
+    invitation = collections.create_invite(campaign["id"])
+    session = collections.create_session_from_invite(invitation["token"], uuid4().hex)["session"]
     for slot, color in (("baseline", "red"), ("counterpart", "blue")):
         image = io.BytesIO()
         Image.new("RGB", (100, 100), color).save(image, format="PNG")
@@ -71,9 +79,30 @@ def system(tmp_path):
         repo.finish(job["id"], job["lease_token"], result, [frame])
         session = repo.snapshot(session["id"])
     pair = repo.publish(session["id"], session["revision"])
+    collections.review_pair(
+        campaign["id"],
+        pair["id"],
+        decision="approved",
+        expected_version=0,
+        reviewer="test-fixture-reviewer",
+        idempotency_key=uuid4().hex,
+    )
+    destination = {"workspace": "test-workspace", "project": "test-project", "visibility": "private"}
+    if getattr(request, "param", True):
+        collections.request_export(pair["id"], destination, "test-fixture-operator")
     calls, uploaded = [], {}
     rig = SimpleNamespace(
-        repo=repo, media=media, config=config, pair=pair, session=session, calls=calls, uploaded=uploaded
+        repo=repo,
+        media=media,
+        config=config,
+        pair=pair,
+        session=session,
+        calls=calls,
+        uploaded=uploaded,
+        collections=collections,
+        campaign=campaign,
+        destination=destination,
+        metadata_calls=[],
     )
 
     def successful(request):
@@ -112,10 +141,22 @@ def system(tmp_path):
         calls.append(request)
         return rig.handler(request)
 
-    with httpx.Client(transport=httpx.MockTransport(transport)) as client:
+    rig.metadata_handler = lambda _: httpx.Response(
+        200, json={"project": {"id": "test-workspace/test-project", "public": False}}
+    )
+
+    def metadata_transport(request):
+        rig.metadata_calls.append(request)
+        return rig.metadata_handler(request)
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(transport)) as client,
+        httpx.Client(transport=httpx.MockTransport(metadata_transport)) as metadata_client,
+    ):
         with RoboflowExporter("only-a-test-key", "test-workspace", "test-project", client=client) as adapter:
             rig.adapter = adapter
-            rig.worker = ExportWorker(repo, media, config, adapter)
+            rig.resolver = DestinationResolver(config, client=metadata_client)
+            rig.worker = ExportWorker(repo, media, config, adapter, destination_resolver=rig.resolver)
             yield rig
     with psycopg.connect(dsn, autocommit=True) as connection:
         connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
@@ -175,7 +216,7 @@ def test_success_records_both_image_and_prediction_before_remote_completion(syst
     assert system.repo.snapshot(system.session["id"])["pair"]["manifest"] == system.pair["manifest"]
 
 
-@pytest.mark.parametrize("disabled", ["enabled", "project", "adapter", "mismatched_adapter"])
+@pytest.mark.parametrize("disabled", ["enabled", "project", "adapter", "mismatched_adapter", "resolver"])
 def test_disabled_or_unconfigured_export_does_not_even_claim(system, monkeypatch, disabled):
     if disabled == "enabled":
         system.config.export_enabled = False
@@ -183,6 +224,8 @@ def test_disabled_or_unconfigured_export_does_not_even_claim(system, monkeypatch
         system.config.export_project = ""
     elif disabled == "adapter":
         system.worker.exporter = None
+    elif disabled == "resolver":
+        system.worker.destination_resolver = None
     else:
         system.adapter.project = "another-project"
     monkeypatch.setattr(system.repo, "export_claim", lambda _: pytest.fail("No claim permitted"))
@@ -421,7 +464,7 @@ def test_partial_export_cannot_switch_destination(system):
     system.config.export_project = "new-project"
     assert system.worker.once()
     assert intent(system)["status"] == "failed"
-    assert intent(system)["last_error"] == "export_receipt_mismatch"
+    assert intent(system)["last_error"] == "export_destination_mismatch"
     assert len(system.calls) == 1
 
 
@@ -486,3 +529,79 @@ def test_definite_provider_rejection_is_not_silently_retried(system, status):
     run_all(system)
     assert intent(system)["status"] == "failed"
     assert len(system.calls) == 1
+
+
+@pytest.mark.parametrize("system", [False], indirect=True)
+def test_enabling_adapter_never_sweeps_historical_published_pairs(system):
+    assert intent(system)["status"] == "disabled"
+    assert intent(system)["destination"] is None
+    assert system.repo.snapshot(system.session["id"])["pair"]["export_status"] == "local_only"
+    assert not system.worker.once()
+    assert not system.calls
+    assert not system.metadata_calls
+    system.collections.request_export(system.pair["id"], system.destination, "explicit-test-operator")
+    run_all(system)
+    assert intent(system)["status"] == "complete"
+    assert len(system.calls) == 4
+
+
+@pytest.mark.parametrize("field", ["workspace", "project", "visibility"])
+def test_destination_mismatch_fails_before_any_provider_request(system, field):
+    destination = {**system.destination, field: "different"}
+    with psycopg.connect(system.repo.dsn) as connection:
+        connection.execute("UPDATE counterpart_export_intents SET destination=%s", (Jsonb(destination),))
+    assert system.worker.once()
+    assert intent(system)["last_error"] == "export_destination_mismatch"
+    assert not system.calls
+    assert not system.metadata_calls
+
+
+def test_new_upload_rechecks_project_privacy_after_previous_success(system):
+    assert system.worker.once()  # first image
+    assert system.worker.once()  # first annotation uses bounded cached privacy
+    assert len(system.metadata_calls) == 1
+    system.metadata_handler = lambda _: httpx.Response(
+        200, json={"project": {"id": "test-workspace/test-project", "public": True}}
+    )
+    assert system.worker.once()  # force check blocks next image
+    assert intent(system)["status"] == "failed"
+    assert intent(system)["last_error"] == "private_destination_required"
+    assert len(system.calls) == 2
+    assert len(system.metadata_calls) == 2
+
+
+def test_metadata_outage_preserves_intent_without_upload_or_hot_loop(system):
+    system.metadata_handler = lambda _: httpx.Response(503)
+    assert system.worker.once()
+    assert intent(system)["status"] == "pending"
+    assert intent(system)["last_error"] == "destination_unavailable"
+    assert intent(system)["receipts"] == {}
+    assert not system.worker.once()
+    assert len(system.metadata_calls) == 1
+    assert not system.calls
+    system.metadata_handler = lambda _: httpx.Response(
+        200, json={"project": {"id": "test-workspace/test-project", "public": False}}
+    )
+    make_available(system)
+    run_all(system)
+    assert intent(system)["status"] == "complete"
+
+
+def test_transient_shared_storage_failure_retries_saved_bytes_without_write_intent(system, monkeypatch):
+    original = system.media.read
+
+    def unavailable(_):
+        raise MediaUnavailable("object_storage_unavailable")
+
+    monkeypatch.setattr(system.media, "read", unavailable)
+    assert system.worker.once()
+    assert intent(system)["status"] == "pending"
+    assert intent(system)["last_error"] == "media_unavailable"
+    assert intent(system)["receipts"] == {}
+    assert not system.worker.once()
+    assert not system.calls
+    assert not system.metadata_calls
+    monkeypatch.setattr(system.media, "read", original)
+    make_available(system)
+    run_all(system)
+    assert intent(system)["status"] == "complete"

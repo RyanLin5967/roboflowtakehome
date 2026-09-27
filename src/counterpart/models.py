@@ -5,16 +5,31 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .recipes import RecipeParameters
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class CreateSession(StrictModel):
+class CreateSession(RecipeParameters):
     recipe: Literal["spatial", "temporal"] = "spatial"
     mode: Literal["live", "replay"] = "replay"
-    object_a: Literal["bottle"] = "bottle"
-    object_b: Literal["cup"] = "cup"
+
+    @model_validator(mode="after")
+    def fixture_roles(self):
+        if self.mode == "replay" and (self.object_a, self.object_b) != ("bottle", "cup"):
+            raise ValueError(
+                "Recorded fixtures use bottle and cup. Custom object roles require live capture."
+            )
+        return self
+
+
+class RetryCapture(StrictModel):
+    capture_id: str = Field(min_length=36, max_length=36)
+    expected_revision: int = Field(ge=0)
+    epoch: int = Field(ge=0)
+    idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[a-zA-Z0-9_.-]+$")
 
 
 class Resume(StrictModel):

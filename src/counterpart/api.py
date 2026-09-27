@@ -1,22 +1,28 @@
 """Capability-protected capture API. Model calls run in a separate worker."""
 
 import hashlib
-import io
 import json
-import zipfile
+import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from .archives import archive_response
 from .config import Settings, settings
-from .models import CaptureMetadata, CreateSession, Publish, Replay, Resume
+from .lifecycle import MaintenanceBusy
+from .models import CaptureMetadata, CreateSession, Publish, Replay, Resume, RetryCapture
+from .object_storage import MediaUnavailable, create_media_store
+from .operator_api import mount_operator
+from .recipes import recipe_catalogue
 from .repository import CapacityExceeded, Conflict, NotFound, Repository
-from .storage import InvalidImage, MediaStore
+from .security import OperatorAuth, OriginGuard
+from .storage import InvalidImage
 
 
 def fingerprint(metadata: dict, frames: list[dict]) -> str:
@@ -34,52 +40,72 @@ class BoundedRequest:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or scope["method"] not in ("POST", "PUT", "PATCH"):
             return await self.app(scope, receive, send)
-        chunks, size = [], 0
-        while True:
-            message = await receive()
-            if message["type"] == "http.disconnect":
-                return
-            body = message.get("body", b"")
-            size += len(body)
-            if size > self.limit:
-                return await JSONResponse(
-                    {
-                        "detail": {
-                            "code": "body_too_large",
-                            "message": "This capture is too large. Use a shorter clip or smaller frames.",
-                        }
-                    },
-                    status_code=413,
-                )(scope, receive, send)
-            chunks.append(body)
-            if not message.get("more_body", False):
-                break
-        sent = False
+        with tempfile.SpooledTemporaryFile(max_size=1024 * 1024) as spool:
+            size = 0
+            while True:
+                message = await receive()
+                if message["type"] == "http.disconnect":
+                    return
+                body = message.get("body", b"")
+                size += len(body)
+                if size > self.limit:
+                    return await JSONResponse(
+                        {
+                            "detail": {
+                                "code": "body_too_large",
+                                "message": "This capture is too large. Use a shorter clip or smaller frames.",
+                            }
+                        },
+                        status_code=413,
+                    )(scope, receive, send)
+                spool.write(body)
+                if not message.get("more_body", False):
+                    break
+            spool.seek(0)
+            sent = False
 
-        async def bounded_receive():
-            nonlocal sent
-            if not sent:
-                sent = True
-                return {"type": "http.request", "body": b"".join(chunks), "more_body": False}
-            return await receive()
+            async def bounded_receive():
+                nonlocal sent
+                if not sent:
+                    body = spool.read(64 * 1024)
+                    sent = spool.tell() >= size
+                    return {"type": "http.request", "body": body, "more_body": not sent}
+                return await receive()
 
-        await self.app(scope, bounded_receive, send)
+            await self.app(scope, bounded_receive, send)
 
 
 def create_app(config: Settings | None = None, repository: Repository | None = None) -> FastAPI:
     config = config or settings()
     repo = repository or Repository(config.database_url)
-    media = MediaStore(config.media_dir, config.max_asset_bytes)
+    media = create_media_store(config)
+    auth = OperatorAuth(config)
+    from .destination import DestinationResolver
+    from .inference_runtime import InferenceRuntime
+
+    inference = InferenceRuntime(repo, media, config, detector=None)
+    destination = DestinationResolver(config)
 
     @asynccontextmanager
     async def lifespan(app):
         repo.initialize()
-        yield
-        if hasattr(repo, "close"):
-            repo.close()
+        inference.initialize()
+        try:
+            yield
+        finally:
+            destination.close()
+            if hasattr(media, "close"):
+                media.close()
+            if hasattr(repo, "close"):
+                repo.close()
 
     app = FastAPI(title="Counterpart", version="0.1.0", lifespan=lifespan)
     app.add_middleware(BoundedRequest, limit=config.max_upload_bytes)
+    app.add_middleware(OriginGuard, allowed_origins=config.allowed_origins)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=config.trusted_hosts)
+    app.state.destination = destination
+    app.state.operator_auth = auth
+    app.state.inference = inference
     app.state.repository = repo
     app.state.media = media
 
@@ -113,6 +139,39 @@ def create_app(config: Settings | None = None, repository: Repository | None = N
     async def image_handler(_request, exc):
         return JSONResponse({"detail": {"code": "invalid_image", "message": str(exc)}}, status_code=422)
 
+    @app.exception_handler(MediaUnavailable)
+    async def media_unavailable_handler(_request, _exc):
+        return JSONResponse(
+            {
+                "detail": {
+                    "code": "storage_unavailable",
+                    "message": "Evidence storage is temporarily unavailable. Retry shortly.",
+                }
+            },
+            status_code=503,
+            headers={"Retry-After": "2"},
+        )
+
+    @app.exception_handler(MaintenanceBusy)
+    async def maintenance_handler(_request, _exc):
+        return JSONResponse(
+            {
+                "detail": {
+                    "code": "maintenance_busy",
+                    "message": "Storage maintenance is running. Retry this saved upload shortly.",
+                }
+            },
+            status_code=503,
+            headers={"Retry-After": "5"},
+        )
+
+    @app.exception_handler(FileNotFoundError)
+    async def missing_media_handler(_request, _exc):
+        return JSONResponse(
+            {"detail": {"code": "missing_evidence", "message": "The recorded image is unavailable."}},
+            status_code=404,
+        )
+
     def authorized(session_id: str, authorization: Annotated[str | None, Header()] = None):
         token = authorization.removeprefix("Bearer ") if authorization else ""
         if not token or not repo.authenticate(session_id, token):
@@ -135,47 +194,22 @@ def create_app(config: Settings | None = None, repository: Repository | None = N
             "replay_available": True,
             "inference_limit": config.inference_limit,
             "export_enabled": config.export_enabled and bool(config.export_project),
-            "metrics": counters,
+            **({"metrics": counters} if not config.require_operator else {}),
         }
 
     @app.get("/api/recipes")
     def recipes():
         return {
-            "recipes": [
-                {
-                    "id": "spatial",
-                    "name": "Switch sides",
-                    "question": "Which side of the cup is the bottle on?",
-                    "baseline": "Put the bottle left of the cup. Keep your camera steady.",
-                    "counterpart": "Keep the cup still. Move the bottle to its right.",
-                    "controls": [
-                        "one cup and one bottle",
-                        "cup position",
-                        "object scale",
-                        "clear separation",
-                    ],
-                },
-                {
-                    "id": "temporal",
-                    "name": "Reverse the order",
-                    "question": "Which object enters the target area first?",
-                    "baseline": (
-                        "Start both objects on the left, one above the other. "
-                        "Move bottle, pause, then cup into the right band."
-                    ),
-                    "counterpart": "Reset both objects. Repeat with cup first, pause, then bottle.",
-                    "controls": [
-                        "matching start and end",
-                        "distinct arrival intervals",
-                        "continuous observations",
-                    ],
-                },
-            ],
+            "recipes": recipe_catalogue(),
             "limits": {"max_frames": 48, "max_duration_ms": 12000, "fps": 4, "max_gap_ms": 600},
         }
 
+    mount_operator(app, config, repo, media, auth, live_ready)
+
     @app.post("/api/sessions", status_code=201)
-    def create(body: CreateSession):
+    def create(body: CreateSession, request: Request):
+        if config.require_operator:
+            auth.require(request)
         if body.mode == "live" and not live_ready():
             raise HTTPException(
                 503,
@@ -188,7 +222,15 @@ def create_app(config: Settings | None = None, repository: Repository | None = N
 
     @app.get("/api/sessions/{session_id}")
     def snapshot(session_id: str, session: Session):
+        capture = session.get("latest_capture")
+        if capture and capture["status"] in {"queued", "running", "pending", "processing"}:
+            progress = inference.progress(capture["frames"])
+            session["progress"] = {**progress, "completed_frames": progress["observed_frames"]}
         return session
+
+    @app.post("/api/sessions/{session_id}/retry", status_code=202)
+    def retry(session_id: str, body: RetryCapture, session: Session):
+        return repo.retry_capture(session_id, **body.model_dump())
 
     @app.post("/api/sessions/{session_id}/resume")
     def resume(session_id: str, body: Resume, session: Session):
@@ -226,20 +268,24 @@ def create_app(config: Settings | None = None, repository: Repository | None = N
             raise HTTPException(
                 422, detail={"code": "frame_count", "message": "Use one photo or 8–48 temporal frames."}
             )
-        stored = []
-        for upload, t_ms in zip(frames, parsed.timestamps_ms, strict=True):
-            data = upload.file.read(config.max_asset_bytes + 1)
-            stored.append({**media.put(data), "t_ms": t_ms})
-        if len({(f["width"], f["height"]) for f in stored}) != 1:
-            raise HTTPException(
-                422,
-                detail={
-                    "code": "frame_dimensions",
-                    "message": "Keep the camera resolution fixed throughout a clip.",
-                },
-            )
-        meta = parsed.model_dump()
-        return repo.submit(session_id, meta, stored, fingerprint(meta, stored))
+        from .lifecycle import media_reference_guard
+
+        repo.check_new_capture_admission(session_id, parsed.idempotency_key)
+        with media_reference_guard(repo.dsn):
+            stored = []
+            for upload, t_ms in zip(frames, parsed.timestamps_ms, strict=True):
+                data = upload.file.read(config.max_asset_bytes + 1)
+                stored.append({**media.put(data), "t_ms": t_ms})
+            if len({(f["width"], f["height"]) for f in stored}) != 1:
+                raise HTTPException(
+                    422,
+                    detail={
+                        "code": "frame_dimensions",
+                        "message": "Keep the camera resolution fixed throughout a clip.",
+                    },
+                )
+            meta = parsed.model_dump()
+            return repo.submit(session_id, meta, stored, fingerprint(meta, stored))
 
     @app.post("/api/sessions/{session_id}/replay", status_code=202)
     def replay(session_id: str, body: Replay, session: Session):
@@ -249,27 +295,30 @@ def create_app(config: Settings | None = None, repository: Repository | None = N
                 detail={"code": "live_only", "message": "Synthetic replay is separate from live captures."},
             )
         from .fixtures import generate
+        from .lifecycle import media_reference_guard
 
-        stored = []
-        for frame in generate(session["recipe"], body.scenario):
-            stored.append(
-                {
-                    **media.put(frame["bytes"]),
-                    "t_ms": frame["t_ms"],
-                    "fixture_detections": frame["detections"],
-                }
-            )
-        slot = body.scenario if body.scenario in ("baseline", "recovery") else "counterpart"
-        meta = {
-            "slot": slot,
-            "expected_revision": body.expected_revision,
-            "epoch": body.epoch,
-            "client_seq": body.expected_revision,
-            "idempotency_key": body.idempotency_key,
-            "timestamps_ms": [f["t_ms"] for f in stored],
-            "interrupted": False,
-        }
-        return repo.submit(session_id, meta, stored, fingerprint(meta, stored))
+        repo.check_new_capture_admission(session_id, body.idempotency_key)
+        with media_reference_guard(repo.dsn):
+            stored = []
+            for frame in generate(session["recipe"], body.scenario):
+                stored.append(
+                    {
+                        **media.put(frame["bytes"]),
+                        "t_ms": frame["t_ms"],
+                        "fixture_detections": frame["detections"],
+                    }
+                )
+            slot = body.scenario if body.scenario in ("baseline", "recovery") else "counterpart"
+            meta = {
+                "slot": slot,
+                "expected_revision": body.expected_revision,
+                "epoch": body.epoch,
+                "client_seq": body.expected_revision,
+                "idempotency_key": body.idempotency_key,
+                "timestamps_ms": [f["t_ms"] for f in stored],
+                "interrupted": False,
+            }
+            return repo.submit(session_id, meta, stored, fingerprint(meta, stored))
 
     @app.post("/api/sessions/{session_id}/publish")
     def publish(session_id: str, body: Publish, session: Session):
@@ -291,20 +340,8 @@ def create_app(config: Settings | None = None, repository: Repository | None = N
 
     @app.get("/api/sessions/{session_id}/archive")
     def archive(session_id: str, session: Session):
-        from .dataset import jsonl
-
-        data = published(session)
-        buffer = io.BytesIO()
-        asset_ids = {f["asset_id"] for slot in ("baseline", "counterpart") for f in data[slot]["frames"]}
-        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as zf:
-            zf.writestr("manifest.json", json.dumps(data, indent=2))
-            zf.writestr("examples.jsonl", jsonl(data))
-            for asset_id in sorted(asset_ids):
-                zf.writestr(f"assets/{asset_id}", media.read(asset_id))
-        return Response(
-            buffer.getvalue(),
-            media_type="application/zip",
-            headers={"Content-Disposition": f'attachment; filename="counterpart-{session_id[:8]}.zip"'},
+        return archive_response(
+            published(session), media, f"counterpart-{session_id[:8]}.zip", max_bytes=config.max_archive_bytes
         )
 
     @app.get("/api/sessions/{session_id}/assets/{asset_id}")

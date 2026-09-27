@@ -1,0 +1,95 @@
+name: counterpart
+
+x-app: &app
+  image: counterpart:local
+  build: .
+  env_file:
+    - ${COUNTERPART_ENV_FILE:?Run deploy/prepare.py and select its compose.env file}
+  environment:
+    COUNTERPART_HOST: 0.0.0.0
+    COUNTERPART_PORT: "8080"
+    COUNTERPART_REQUIRE_OPERATOR: "true"
+    COUNTERPART_OPERATOR_LOCAL_HTTP: "true"
+    COUNTERPART_MEDIA_DIR: /data/media
+    COUNTERPART_WEB_DIR: /app/web/dist
+  volumes:
+    - media:/data/media
+    - scratch:/data/scratch
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m
+  security_opt:
+    - no-new-privileges:true
+  cap_drop: [ALL]
+  init: true
+  stop_grace_period: 90s
+  networks: [backend]
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  postgres:
+    image: postgres:17.11-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652
+    environment:
+      POSTGRES_USER: counterpart
+      POSTGRES_DB: counterpart
+      POSTGRES_PASSWORD_FILE: /run/secrets/database_password
+    secrets: [database_password]
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U counterpart -d counterpart"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    shm_size: 128mb
+
+  initialize:
+    <<: *app
+    command: [counterpart, init]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *app
+    command: [counterpart, serve]
+    ports: ["127.0.0.1:8080:8080"]
+    depends_on:
+      initialize:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=4).close()"]
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    restart: unless-stopped
+
+  worker:
+    <<: *app
+    command: [counterpart, worker]
+    depends_on:
+      initialize:
+        condition: service_completed_successfully
+    # Process/container state is NOT a worker-readiness signal. Use the operator
+    # queue/lease view and a replay canary to verify actual work consumption.
+    restart: unless-stopped
+
+secrets:
+  database_password:
+    file: ${COUNTERPART_DB_PASSWORD_FILE:?Run deploy/prepare.py first}
+
+volumes:
+  postgres:
+  media:
+  scratch:
+
+networks:
+  backend:

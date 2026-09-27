@@ -1,0 +1,209 @@
+# Deploying Counterpart
+
+The base topology is a private, single-host service: PostgreSQL 17, a nonroot API,
+separate nonroot workers, and a durable shared media volume. It does not publish a
+database port, start a model, enable provider calls, or expose the application on
+the public network. The API binds host loopback. The optional TLS overlay is an
+explicit deployment action, not part of starting the local stack.
+
+## Evidence and limits
+
+On 2026-09-26, the S3 adapter was exercised against an actual localhost Moto HTTP
+server, including concurrent writes and response loss. Base and TLS Compose files
+were parsed with official Docker Compose v5.5.1 and inspected for private port
+binding and required operator authentication. Image tags and multiarchitecture
+manifest digests were checked against Docker Hub. **Container image build, stack
+boot, Caddy certificate issuance, and real S3 deployment have not been executed:**
+this machine's Docker daemon was unavailable. The temporary Compose executable
+was digest verified and removed after validation. No VM was started and no cloud
+storage was provisioned. These distinctions are deployment gates, not claims of
+production validation.
+
+## Private container setup
+
+Requires Docker Engine/Desktop with Compose and enough resources for ordinary web
+services; there is no local GPU, inference runtime, or model download. The pinned
+image includes Python 3.13.15 and the frontend built with Node 24.21.0. Python and
+npm dependencies resolve from the committed lockfiles; runtime contains neither
+Node nor development Python packages.
+
+From the repository root:
+
+```sh
+python3 deploy/prepare.py
+docker compose --env-file "$HOME/.config/counterpart/deploy/compose.env" config --quiet
+docker compose --env-file "$HOME/.config/counterpart/deploy/compose.env" up --build -d
+```
+
+`prepare.py` generates random database/operator secrets in owner-readable files
+outside the repository. It never overwrites an existing setup or prints secrets.
+The startup initializer runs before the API and worker; PostgreSQL has a readiness
+probe, and API health exercises its database path. A running worker container is
+only process liveness: check the operator queue and complete a replay capture to
+prove work consumption. The shared media directory is initialized for UID/GID
+10001; external bind mounts need matching permissions.
+
+Open `http://127.0.0.1:8080`. Read the operator token privately from
+`~/.config/counterpart/deploy/runtime.env` to sign in. Do not paste configuration
+into logs, issue reports, or `docker compose config` output; use `config --quiet`.
+Operator access and collector invitations are distinct from each session's
+capability. Session links are secrets and must not be posted publicly.
+
+The generated config disables live inference and external export. To enable a
+bounded Roboflow deployment, edit the private `runtime.env`, set
+`COUNTERPART_LIVE_ENABLED=true`, and add `ROBOFLOW_API_KEY` and
+`ROBOFLOW_WORKSPACE`. Verify the account's current free-credit/charge controls
+before doing so. `COUNTERPART_INFERENCE_LIMIT` is the lifetime durable image-call
+allowance in this database, not a monthly allowance. Keep its budget reservations
+when restoring or migrating. Retried/ambiguous calls remain counted. Do not enable
+Roboflow export to a public project for personal camera captures.
+
+## Phone capture and TLS
+
+A phone visiting an ordinary LAN HTTP address does not get the browser's
+localhost camera exception. Serve HTTPS with a certificate the phone trusts.
+The Caddy overlay uses automatic HTTPS for a real hostname; its HTTP listener is
+for certificate challenges and redirect only. Before opening a firewall, finish
+the private replay gate, verify operator login/invite admission, choose an allowed
+origin, and keep provider limits configured. No public deployment has been
+performed by the build agent.
+
+Set `COUNTERPART_DOMAIN` in the private `compose.env`, create the domain's DNS
+record for the chosen host, and allow ports 80/443 only after choosing to expose it:
+
+```sh
+docker compose --env-file "$HOME/.config/counterpart/deploy/compose.env" \
+  -f compose.yaml -f deploy/compose.tls.yaml config --quiet
+docker compose --env-file "$HOME/.config/counterpart/deploy/compose.env" \
+  -f compose.yaml -f deploy/compose.tls.yaml up --build -d
+```
+
+The overlay enforces secure operator cookies, the HTTPS origin and a hostname
+allowlist. Caddy forwards to the private API and persists certificate state. It
+does not enable access logging, which could expose capture URLs. With Cloudflare,
+use Full (strict) TLS and a reachable origin; DNS alone does not host this backend.
+Cloudflare Pages alone cannot run the PostgreSQL/worker portion. Local loopback
+remains bound for debugging, but secure cookies require using the HTTPS origin
+for operator operations once the overlay is active.
+
+## S3-compatible durable media
+
+For workers on multiple machines, use S3 storage or an actually shared persistent
+filesystem. A machine-local directory with the same pathname is not shared data.
+The database remains the only authority for which complete pairs exist. The
+browser never receives storage credentials or a presigned bucket URL: authorized
+API reads return verified media.
+
+Create a **private** bucket separately, enable suitable encryption/versioning and
+backups, and give the runtime principal only object read and conditional write
+access to the configured prefix. `deploy/s3-policy.example.json` is an AWS IAM
+example; replace the bucket and adapt for provider-specific policy support.
+There is no bucket-creation API, public ACL, or remote URL intake in
+`S3MediaStore`. Listing/deletion methods are for explicit maintenance under the
+exclusive database reference lock, using a separate identity with scoped
+`s3:ListBucket` and `s3:DeleteObject` permissions. Runtime credentials use boto3's standard workload identity /
+environment chain. Prefer workload identity; if using credentials, place them
+only in private runtime configuration:
+
+```dotenv
+COUNTERPART_STORAGE_BACKEND=s3
+COUNTERPART_S3_BUCKET=your-private-bucket
+COUNTERPART_S3_PREFIX=counterpart/media
+COUNTERPART_S3_REGION=us-east-1
+# Optional operator-selected S3-compatible origin, HTTPS only:
+# COUNTERPART_S3_ENDPOINT_URL=https://your-storage-endpoint.example
+# AWS_ACCESS_KEY_ID=...
+# AWS_SECRET_ACCESS_KEY=...
+```
+
+Every image is validated before upload and addressed by its original-byte
+SHA-256, under `prefix/first-two-hex-digits/full-digest`. Uploads use
+`If-None-Match: *` and a SHA-256 transport checksum. A 412 reads and verifies the
+already-stored bytes; 409 is retried a bounded number of times. A lost response
+cannot silently overwrite the object on retry. Unconditional writes are never a
+fallback for an incompatible provider. All reads bound the body size and verify
+the digest; ETag and object metadata alone are not trusted as integrity proof.
+
+S3 compatibility varies. Before using a provider, run real conditional-write,
+concurrent-replay, response-loss and readback tests against a dedicated bucket
+within an explicit budget. Moto tests do not prove that a particular hosted
+provider implements those semantics. An administrator with wider credentials can
+still overwrite/delete data; application immutability is not WORM compliance.
+Do not apply blanket bucket expiration rules: accepted pairs retain asset
+references. Retention must reconcile references first and use a separate
+maintenance identity. Versioned-bucket deletion creates a delete marker; old
+versions and their storage charges remain. This is not a historical-byte purge.
+
+Changing storage backend does not migrate historical assets. Pause API/workers,
+copy and verify all referenced blobs without changing digests, preserve the
+database and allowance ledger, then switch both API and every worker together.
+Test old-pair downloads before admitting new collection.
+
+## Operation, backup, restore and rollout
+
+Upload and ZIP spools use a dedicated disk-backed `scratch` volume through
+`TMPDIR=/data/scratch`; they do not consume the container's small `/tmp` RAM mount.
+Temporary files close after requests and process exits. Provision disk for concurrent
+uploads/downloads and monitor available space. The default maximum archive is512MiB;
+release smaller groups of complete pairs above that limit. Scratch is disposable and
+must not be treated as original evidence or included in evidence backups.
+
+Keep API and worker from the same image revision. Scale workers with
+`--scale worker=2`; transaction/lease admission still bounds concurrent committed
+verification. Adding workers does not increase a provider allowance. Monitor
+pending age, expired leases, recovery failures, budget rejections and export
+reconciliation; container restarts alone are not proof of useful work.
+
+For a consistent filesystem backup, stop API and workers, dump PostgreSQL and
+copy the media volume while capture/retention writes are stopped. For example,
+with `umask 077` and an existing private backup directory:
+
+```sh
+docker compose --env-file "$HOME/.config/counterpart/deploy/compose.env" stop api worker
+docker compose --env-file "$HOME/.config/counterpart/deploy/compose.env" exec -T postgres \
+  pg_dump -U counterpart -d counterpart -Fc > /private/backup/counterpart.dump
+docker compose --env-file "$HOME/.config/counterpart/deploy/compose.env" \
+  cp api:/data/media /private/backup/media
+docker compose --env-file "$HOME/.config/counterpart/deploy/compose.env" start api worker
+```
+
+Use a real private path; the paths above are placeholders. Check every command's
+exit code and restart services even if a backup fails. Protect copies as camera
+data. For S3, retain the bucket or a verified independent copy plus the exact
+storage config; a database dump alone does not contain the media.
+
+Restore into an **isolated empty database and empty storage target**, never the
+running service. Use `pg_restore --exit-on-error --no-owner`, restore media with
+the correct ownership, then start one worker and verify old pair downloads,
+SHA-256 readback, preserved budget reservations, invitation/session access, and a
+new replay capture. Only switch traffic after that rehearsal passes. No restore
+rehearsal of the container topology is claimed yet. The local integration suite
+tests the database/worker recovery semantics separately.
+
+Before an update: back up, record the image revision, stop admission during schema
+changes, run initializer, then roll API and workers together. An application image
+rollback does not automatically roll back schema/data changes; use the tested
+restore procedure if the old image is incompatible. Never use `down --volumes`
+as a routine restart: it destroys evidence and the spending ledger.
+
+## Reused implementations and sources
+
+- [AWS conditional writes](https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html)
+  and [PutObject API](https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html):
+  native conditional creation and conflicts, rather than a racy HEAD-then-PUT lock.
+- [AWS policy enforcement](https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes-enforce.html):
+  optional infrastructure enforcement of the same write precondition.
+- [Boto3](https://github.com/boto/boto3), Apache-2.0, pinned 1.43.103; standard
+  SigV4 transport, credentials and bounded retry implementation.
+- [Moto server mode](https://docs.getmoto.org/en/latest/docs/server_mode.html),
+  Apache-2.0, pinned 5.2.3; local HTTP contract testing, not a production store.
+- [Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https) and
+  [reverse proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy):
+  certificate management and HTTPS termination, rather than custom TLS code.
+- Official [Python](https://hub.docker.com/_/python),
+  [Node](https://hub.docker.com/_/node), [Postgres](https://hub.docker.com/_/postgres)
+  and [Caddy](https://hub.docker.com/_/caddy) image manifests, exact digests pinned.
+
+Targeted Exa search was also used to find/verify the AWS primary documentation.
+No third-party application source was copied; package/source licenses remain with
+their respective projects.

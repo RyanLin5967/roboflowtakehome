@@ -1,0 +1,30 @@
+# Explicit opt-in overlay. No public listener exists in the base topology.
+services:
+  api:
+    environment:
+      COUNTERPART_OPERATOR_COOKIE_SECURE: "true"
+      COUNTERPART_OPERATOR_LOCAL_HTTP: "false"
+      COUNTERPART_ALLOWED_ORIGINS: '["https://${COUNTERPART_DOMAIN:?Set a domain before TLS deployment}"]'
+      COUNTERPART_TRUSTED_HOSTS: '["${COUNTERPART_DOMAIN}","127.0.0.1","localhost","api"]'
+  caddy:
+    image: caddy:2.11.4-alpine@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b
+    environment:
+      COUNTERPART_DOMAIN: ${COUNTERPART_DOMAIN:?Set a domain before TLS deployment}
+    ports:
+      - 80:80
+      - 443:443
+      - 443:443/udp
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [backend]
+    depends_on:
+      api:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+volumes:
+  caddy_data:
+  caddy_config:

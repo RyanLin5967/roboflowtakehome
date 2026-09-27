@@ -1,0 +1,1547 @@
+{
+  "completed_at": "2026-09-27T00:05:41.777987+00:00",
+  "counts": {
+    "full_pair_reference_refusals": 3,
+    "observed_photos": 6,
+    "selected_original_photos": 6,
+    "source_relation_correct": 6
+  },
+  "expected_pair_admission": "reject because reference object also changes sides",
+  "frozen_at": "2026-09-27T00:05:40.405963+00:00",
+  "ledger_after": 8,
+  "ledger_allowance": 512,
+  "ledger_before": 2,
+  "limits": [
+    "Public images; not user captures or independent human collection validation.",
+    "Six examples from one scene cannot establish general CV accuracy or latency.",
+    "Source labels describe image-plane relation, not fixed-anchor controls.",
+    "No threshold tuning, image editing, private-image upload or Modal compute."
+  ],
+  "maximum_new_image_calls": 6,
+  "model_id": "coco/39",
+  "pairs": [
+    {
+      "decision": {
+        "accepted": false,
+        "checks": [
+          {
+            "detail": "Both classes have one sufficiently confident detection in every observation.",
+            "name": "visible_unambiguous_objects",
+            "passed": true
+          },
+          {
+            "detail": "Keep the same image orientation and crop.",
+            "name": "image_aspect",
+            "passed": true
+          },
+          {
+            "detail": "Keep the same image orientation and crop.",
+            "name": "image_aspect",
+            "passed": true
+          },
+          {
+            "detail": "This check requires exactly one saved image.",
+            "name": "single_image",
+            "passed": true
+          },
+          {
+            "detail": "Keep the cup and camera in the reference position.",
+            "name": "reference_position",
+            "passed": false
+          }
+        ],
+        "code": "reference_moved",
+        "evidence": {
+          "can_complete_pair": false,
+          "limitations": [
+            "Checks use detector observations, which can be wrong or miss objects.",
+            "Relations are measured in the image plane, not physical 3-D space.",
+            "Object positions and sizes check named controls; they cannot prove that the camera, lighting, background, or every other scene detail stayed unchanged.",
+            "Matching a class across captures does not establish the identity of a physical object."
+          ],
+          "object_a": "book",
+          "object_b": "cup",
+          "observations": [
+            {
+              "asset_id": "57f5a20ddcf94c6188e8f943abe854c25863b409f0d142f3cefb28d81bde22bc",
+              "height": 960,
+              "objects": {
+                "book": {
+                  "box": [
+                    0.55234375,
+                    0.459375,
+                    0.7546875,
+                    0.71875
+                  ],
+                  "center": [
+                    0.653515625,
+                    0.5890625
+                  ],
+                  "confidence": 0.8687740564346313,
+                  "size": [
+                    0.20234374999999993,
+                    0.259375
+                  ]
+                },
+                "cup": {
+                  "box": [
+                    0.23984375,
+                    0.35833333333333334,
+                    0.41171875,
+                    0.6447916666666667
+                  ],
+                  "center": [
+                    0.32578125,
+                    0.5015625
+                  ],
+                  "confidence": 0.9426776170730591,
+                  "size": [
+                    0.17187500000000003,
+                    0.2864583333333333
+                  ]
+                }
+              },
+              "t_ms": 0.0,
+              "width": 1280
+            }
+          ],
+          "recipe": "spatial",
+          "relation": "right",
+          "slot": "counterpart",
+          "thresholds": {
+            "ambiguity_confidence": 0.35,
+            "anchor_center_tolerance": 0.035,
+            "anchor_scale_tolerance": 0.15,
+            "aspect_ratio_tolerance": 0.02,
+            "image_border_inset": 0.01,
+            "minimum_confidence": 0.6,
+            "minimum_object_dimension": 0.025,
+            "moving_scale_tolerance": 0.2,
+            "relation_box_gap": 0.02,
+            "relation_center_separation": 0.18,
+            "spatial_vertical_tolerance": 0.05,
+            "temporal_boundary_guard": 0.025,
+            "temporal_lane_tolerance": 0.055,
+            "temporal_max_duration_ms": 12000,
+            "temporal_max_frames": 48,
+            "temporal_max_gap_ms": 600,
+            "temporal_min_frames": 8,
+            "temporal_min_lane_separation": 0.2,
+            "temporal_min_order_margin_ms": 150,
+            "temporal_min_stable_ms": 150,
+            "temporal_pair_position_tolerance": 0.05,
+            "temporal_stable_position_tolerance": 0.035,
+            "temporal_start_max_x": 0.42,
+            "temporal_target_min_x": 0.62
+          }
+        },
+        "message": "Keep the cup and camera in the reference position.",
+        "verifier_version": "counterpart-verifier/1.0.0"
+      },
+      "expected_admission": "rejected_reference_moved",
+      "expected_control_refusal": true,
+      "objects": [
+        "book",
+        "cup"
+      ]
+    },
+    {
+      "decision": {
+        "accepted": false,
+        "checks": [
+          {
+            "detail": "Both classes have one sufficiently confident detection in every observation.",
+            "name": "visible_unambiguous_objects",
+            "passed": true
+          },
+          {
+            "detail": "Keep the same image orientation and crop.",
+            "name": "image_aspect",
+            "passed": true
+          },
+          {
+            "detail": "Keep the same image orientation and crop.",
+            "name": "image_aspect",
+            "passed": true
+          },
+          {
+            "detail": "This check requires exactly one saved image.",
+            "name": "single_image",
+            "passed": true
+          },
+          {
+            "detail": "Keep the book and camera in the reference position.",
+            "name": "reference_position",
+            "passed": false
+          }
+        ],
+        "code": "reference_moved",
+        "evidence": {
+          "can_complete_pair": false,
+          "limitations": [
+            "Checks use detector observations, which can be wrong or miss objects.",
+            "Relations are measured in the image plane, not physical 3-D space.",
+            "Object positions and sizes check named controls; they cannot prove that the camera, lighting, background, or every other scene detail stayed unchanged.",
+            "Matching a class across captures does not establish the identity of a physical object."
+          ],
+          "object_a": "cup",
+          "object_b": "book",
+          "observations": [
+            {
+              "asset_id": "57253d734b0869a37f8d5faa77275b51b02f2ca3b330d8de861630e8d41c28c2",
+              "height": 960,
+              "objects": {
+                "book": {
+                  "box": [
+                    0.24765625,
+                    0.42291666666666666,
+                    0.45859375,
+                    0.659375
+                  ],
+                  "center": [
+                    0.353125,
+                    0.5411458333333333
+                  ],
+                  "confidence": 0.9514641165733337,
+                  "size": [
+                    0.21093750000000003,
+                    0.23645833333333338
+                  ]
+                },
+                "cup": {
+                  "box": [
+                    0.58515625,
+                    0.35208333333333336,
+                    0.7765625,
+                    0.5927083333333333
+                  ],
+                  "center": [
+                    0.680859375,
+                    0.47239583333333335
+                  ],
+                  "confidence": 0.9574522972106934,
+                  "size": [
+                    0.19140625,
+                    0.24062499999999992
+                  ]
+                }
+              },
+              "t_ms": 0.0,
+              "width": 1280
+            }
+          ],
+          "recipe": "spatial",
+          "relation": "right",
+          "slot": "counterpart",
+          "thresholds": {
+            "ambiguity_confidence": 0.35,
+            "anchor_center_tolerance": 0.035,
+            "anchor_scale_tolerance": 0.15,
+            "aspect_ratio_tolerance": 0.02,
+            "image_border_inset": 0.01,
+            "minimum_confidence": 0.6,
+            "minimum_object_dimension": 0.025,
+            "moving_scale_tolerance": 0.2,
+            "relation_box_gap": 0.02,
+            "relation_center_separation": 0.18,
+            "spatial_vertical_tolerance": 0.05,
+            "temporal_boundary_guard": 0.025,
+            "temporal_lane_tolerance": 0.055,
+            "temporal_max_duration_ms": 12000,
+            "temporal_max_frames": 48,
+            "temporal_max_gap_ms": 600,
+            "temporal_min_frames": 8,
+            "temporal_min_lane_separation": 0.2,
+            "temporal_min_order_margin_ms": 150,
+            "temporal_min_stable_ms": 150,
+            "temporal_pair_position_tolerance": 0.05,
+            "temporal_stable_position_tolerance": 0.035,
+            "temporal_start_max_x": 0.42,
+            "temporal_target_min_x": 0.62
+          }
+        },
+        "message": "Keep the book and camera in the reference position.",
+        "verifier_version": "counterpart-verifier/1.0.0"
+      },
+      "expected_admission": "rejected_reference_moved",
+      "expected_control_refusal": true,
+      "objects": [
+        "cup",
+        "book"
+      ]
+    },
+    {
+      "decision": {
+        "accepted": false,
+        "checks": [
+          {
+            "detail": "Both classes have one sufficiently confident detection in every observation.",
+            "name": "visible_unambiguous_objects",
+            "passed": true
+          },
+          {
+            "detail": "Keep the same image orientation and crop.",
+            "name": "image_aspect",
+            "passed": true
+          },
+          {
+            "detail": "Keep the same image orientation and crop.",
+            "name": "image_aspect",
+            "passed": true
+          },
+          {
+            "detail": "This check requires exactly one saved image.",
+            "name": "single_image",
+            "passed": true
+          },
+          {
+            "detail": "Keep the cell phone and camera in the reference position.",
+            "name": "reference_position",
+            "passed": false
+          }
+        ],
+        "code": "reference_moved",
+        "evidence": {
+          "can_complete_pair": false,
+          "limitations": [
+            "Checks use detector observations, which can be wrong or miss objects.",
+            "Relations are measured in the image plane, not physical 3-D space.",
+            "Object positions and sizes check named controls; they cannot prove that the camera, lighting, background, or every other scene detail stayed unchanged.",
+            "Matching a class across captures does not establish the identity of a physical object."
+          ],
+          "object_a": "cup",
+          "object_b": "cell phone",
+          "observations": [
+            {
+              "asset_id": "a3296ad0bd67d51e10250cb2ada5a9fabaaa5d7e1fe316225f07c005e2e65c82",
+              "height": 960,
+              "objects": {
+                "cell phone": {
+                  "box": [
+                    0.23984375,
+                    0.51875,
+                    0.39609375,
+                    0.7083333333333334
+                  ],
+                  "center": [
+                    0.31796875,
+                    0.6135416666666667
+                  ],
+                  "confidence": 0.9334166646003723,
+                  "size": [
+                    0.15625000000000003,
+                    0.18958333333333333
+                  ]
+                },
+                "cup": {
+                  "box": [
+                    0.578125,
+                    0.3958333333333333,
+                    0.796875,
+                    0.66875
+                  ],
+                  "center": [
+                    0.6875,
+                    0.5322916666666666
+                  ],
+                  "confidence": 0.9631214737892151,
+                  "size": [
+                    0.21875,
+                    0.27291666666666664
+                  ]
+                }
+              },
+              "t_ms": 0.0,
+              "width": 1280
+            }
+          ],
+          "recipe": "spatial",
+          "relation": "right",
+          "slot": "counterpart",
+          "thresholds": {
+            "ambiguity_confidence": 0.35,
+            "anchor_center_tolerance": 0.035,
+            "anchor_scale_tolerance": 0.15,
+            "aspect_ratio_tolerance": 0.02,
+            "image_border_inset": 0.01,
+            "minimum_confidence": 0.6,
+            "minimum_object_dimension": 0.025,
+            "moving_scale_tolerance": 0.2,
+            "relation_box_gap": 0.02,
+            "relation_center_separation": 0.18,
+            "spatial_vertical_tolerance": 0.05,
+            "temporal_boundary_guard": 0.025,
+            "temporal_lane_tolerance": 0.055,
+            "temporal_max_duration_ms": 12000,
+            "temporal_max_frames": 48,
+            "temporal_max_gap_ms": 600,
+            "temporal_min_frames": 8,
+            "temporal_min_lane_separation": 0.2,
+            "temporal_min_order_margin_ms": 150,
+            "temporal_min_stable_ms": 150,
+            "temporal_pair_position_tolerance": 0.05,
+            "temporal_stable_position_tolerance": 0.035,
+            "temporal_start_max_x": 0.42,
+            "temporal_target_min_x": 0.62
+          }
+        },
+        "message": "Keep the cell phone and camera in the reference position.",
+        "verifier_version": "counterpart-verifier/1.0.0"
+      },
+      "expected_admission": "rejected_reference_moved",
+      "expected_control_refusal": true,
+      "objects": [
+        "cup",
+        "cell phone"
+      ]
+    }
+  ],
+  "photos": {
+    "book_left_of_cup.jpeg": {
+      "diagnostic": {
+        "accepted": true,
+        "checks": [
+          {
+            "detail": "Both classes have one sufficiently confident detection in every observation.",
+            "name": "visible_unambiguous_objects",
+            "passed": true
+          },
+          {
+            "detail": "Keep the same image orientation and crop.",
+            "name": "image_aspect",
+            "passed": true
+          },
+          {
+            "detail": "This check requires exactly one saved image.",
+            "name": "single_image",
+            "passed": true
+          },
+          {
+            "detail": "Place the book clearly to the left of the cup, with visible space between them.",
+            "name": "requested_relation",
+            "passed": true
+          }
+        ],
+        "code": "accepted",
+        "evidence": {
+          "can_complete_pair": false,
+          "limitations": [
+            "Checks use detector observations, which can be wrong or miss objects.",
+            "Relations are measured in the image plane, not physical 3-D space.",
+            "Object positions and sizes check named controls; they cannot prove that the camera, lighting, background, or every other scene detail stayed unchanged.",
+            "Matching a class across captures does not establish the identity of a physical object."
+          ],
+          "object_a": "book",
+          "object_b": "cup",
+          "observations": [
+            {
+              "asset_id": "0f1a76ed072600016caf50674bcfa8b56933d66f35cab9b7a838a964ff8fba73",
+              "height": 960,
+              "objects": {
+                "book": {
+                  "box": [
+                    0.18046875,
+                    0.4552083333333333,
+                    0.440625,
+                    0.7114583333333333
+                  ],
+                  "center": [
+                    0.310546875,
+                    0.5833333333333333
+                  ],
+                  "confidence": 0.9485357403755188,
+                  "size": [
+                    0.26015625,
+                    0.25625
+                  ]
+                },
+                "cup": {
+                  "box": [
+                    0.565625,
+                    0.35625,
+                    0.73125,
+                    0.634375
+                  ],
+                  "center": [
+                    0.6484375,
+                    0.49531250000000004
+                  ],
+                  "confidence": 0.9585879445075989,
+                  "size": [
+                    0.1656249999999999,
+                    0.278125
+                  ]
+                }
+              },
+              "t_ms": 0.0,
+              "width": 1280
+            }
+          ],
+          "recipe": "spatial",
+          "relation": "left",
+          "slot": "baseline",
+          "thresholds": {
+            "ambiguity_confidence": 0.35,
+            "anchor_center_tolerance": 0.035,
+            "anchor_scale_tolerance": 0.15,
+            "aspect_ratio_tolerance": 0.02,
+            "image_border_inset": 0.01,
+            "minimum_confidence": 0.6,
+            "minimum_object_dimension": 0.025,
+            "moving_scale_tolerance": 0.2,
+            "relation_box_gap": 0.02,
+            "relation_center_separation": 0.18,
+            "spatial_vertical_tolerance": 0.05,
+            "temporal_boundary_guard": 0.025,
+            "temporal_lane_tolerance": 0.055,
+            "temporal_max_duration_ms": 12000,
+            "temporal_max_frames": 48,
+            "temporal_max_gap_ms": 600,
+            "temporal_min_frames": 8,
+            "temporal_min_lane_separation": 0.2,
+            "temporal_min_order_margin_ms": 150,
+            "temporal_min_stable_ms": 150,
+            "temporal_pair_position_tolerance": 0.05,
+            "temporal_stable_position_tolerance": 0.035,
+            "temporal_start_max_x": 0.42,
+            "temporal_target_min_x": 0.62
+          }
+        },
+        "message": "The spatial relation and named controls passed.",
+        "verifier_version": "counterpart-verifier/1.0.0"
+      },
+      "expected_relation": "left",
+      "job_key": "whatsup-controlled-b-six-v1:book_left_of_cup.jpeg",
+      "object_a": "book",
+      "object_b": "cup",
+      "observation": {
+        "asset_id": "0f1a76ed072600016caf50674bcfa8b56933d66f35cab9b7a838a964ff8fba73",
+        "bytes": 159804,
+        "detections": [
+          {
+            "box": [
+              0.565625,
+              0.35625,
+              0.73125,
+              0.634375
+            ],
+            "confidence": 0.9585879445075989,
+            "label": "cup"
+          },
+          {
+            "box": [
+              0.18046875,
+              0.4552083333333333,
+              0.440625,
+              0.7114583333333333
+            ],
+            "confidence": 0.9485357403755188,
+            "label": "book"
+          },
+          {
+            "box": [
+              0.0,
+              0.35,
+              1.0,
+              0.9895833333333334
+            ],
+            "confidence": 0.4218498766422272,
+            "label": "dining table"
+          }
+        ],
+        "height": 960,
+        "inference": {
+          "cache_key": "81cf2ba6550c3c9b07c61d0120851591eb61bdf47956fc4de630dc45315c16fb",
+          "configuration_digest": "03e124fdfc190d5d20f9285a49250078608b58cda13e8481dc7401d9f8a152e9",
+          "lookup_and_dispatch_ms": 783.0918340478092,
+          "observation_id": "b7c35fd8-ab19-4dc4-8541-eec0bde07821",
+          "observed_at": "2026-09-26T20:05:41.252798-04:00",
+          "provider_latency_ms": 770.9005830110982,
+          "source": "provider"
+        },
+        "media_type": "image/jpeg",
+        "model": {
+          "confidence_threshold": 0.25,
+          "model_id": "coco/39",
+          "normalizer_version": "rf-xyxy-v1",
+          "provider": "roboflow"
+        },
+        "t_ms": 0,
+        "width": 1280
+      },
+      "observed_relation": "left",
+      "relation_correct": true,
+      "sha256": "0f1a76ed072600016caf50674bcfa8b56933d66f35cab9b7a838a964ff8fba73",
+      "source_file": "book_left_of_cup.jpeg",
+      "status": "observed"
+    },
+    "book_right_of_cup.jpeg": {
+      "diagnostic": {
+        "accepted": false,
+        "checks": [
+          {
+            "detail": "Both classes have one sufficiently confident detection in every observation.",
+            "name": "visible_unambiguous_objects",
+            "passed": true
+          },
+          {
+            "detail": "Keep the same image orientation and crop.",
+            "name": "image_aspect",
+            "passed": true
+          },
+          {
+            "detail": "This check requires exactly one saved image.",
+            "name": "single_image",
+            "passed": true
+          },
+          {
+            "detail": "Place the book clearly to the left of the cup, with visible space between them.",
+            "name": "requested_relation",
+            "passed": false
+          }
+        ],
+        "code": "wrong_relation",
+        "evidence": {
+          "can_complete_pair": false,
+          "limitations": [
+            "Checks use detector observations, which can be wrong or miss objects.",
+            "Relations are measured in the image plane, not physical 3-D space.",
+            "Object positions and sizes check named controls; they cannot prove that the camera, lighting, background, or every other scene detail stayed unchanged.",
+            "Matching a class across captures does not establish the identity of a physical object."
+          ],
+          "object_a": "book",
+          "object_b": "cup",
+          "observations": [
+            {
+              "asset_id": "57f5a20ddcf94c6188e8f943abe854c25863b409f0d142f3cefb28d81bde22bc",
+              "height": 960,
+              "objects": {
+                "book": {
+                  "box": [
+                    0.55234375,
+                    0.459375,
+                    0.7546875,
+                    0.71875
+                  ],
+                  "center": [
+                    0.653515625,
+                    0.5890625
+                  ],
+                  "confidence": 0.8687740564346313,
+                  "size": [
+                    0.20234374999999993,
+                    0.259375
+                  ]
+                },
+                "cup": {
+                  "box": [
+                    0.23984375,
+                    0.35833333333333334,
+                    0.41171875,
+                    0.6447916666666667
+                  ],
+                  "center": [
+                    0.32578125,
+                    0.5015625
+                  ],
+                  "confidence": 0.9426776170730591,
+                  "size": [
+                    0.17187500000000003,
+                    0.2864583333333333
+                  ]
+                }
+              },
+              "t_ms": 0.0,
+              "width": 1280
+            }
+          ],
+          "recipe": "spatial",
+          "relation": "right",
+          "slot": "baseline",
+          "thresholds": {
+            "ambiguity_confidence": 0.35,
+            "anchor_center_tolerance": 0.035,
+            "anchor_scale_tolerance": 0.15,
+            "aspect_ratio_tolerance": 0.02,
+            "image_border_inset": 0.01,
+            "minimum_confidence": 0.6,
+            "minimum_object_dimension": 0.025,
+            "moving_scale_tolerance": 0.2,
+            "relation_box_gap": 0.02,
+            "relation_center_separation": 0.18,
+            "spatial_vertical_tolerance": 0.05,
+            "temporal_boundary_guard": 0.025,
+            "temporal_lane_tolerance": 0.055,
+            "temporal_max_duration_ms": 12000,
+            "temporal_max_frames": 48,
+            "temporal_max_gap_ms": 600,
+            "temporal_min_frames": 8,
+            "temporal_min_lane_separation": 0.2,
+            "temporal_min_order_margin_ms": 150,
+            "temporal_min_stable_ms": 150,
+            "temporal_pair_position_tolerance": 0.05,
+            "temporal_stable_position_tolerance": 0.035,
+            "temporal_start_max_x": 0.42,
+            "temporal_target_min_x": 0.62
+          }
+        },
+        "message": "Place the book clearly to the left of the cup, with visible space between them.",
+        "verifier_version": "counterpart-verifier/1.0.0"
+      },
+      "expected_relation": "right",
+      "job_key": "whatsup-controlled-b-six-v1:book_right_of_cup.jpeg",
+      "object_a": "book",
+      "object_b": "cup",
+      "observation": {
+        "asset_id": "57f5a20ddcf94c6188e8f943abe854c25863b409f0d142f3cefb28d81bde22bc",
+        "bytes": 150307,
+        "detections": [
+          {
+            "box": [
+              0.23984375,
+              0.35833333333333334,
+              0.41171875,
+              0.6447916666666667
+            ],
+            "confidence": 0.9426776170730591,
+            "label": "cup"
+          },
+          {
+            "box": [
+              0.55234375,
+              0.459375,
+              0.7546875,
+              0.71875
+            ],
+            "confidence": 0.8687740564346313,
+            "label": "book"
+          },
+          {
+            "box": [
+              0.0015625,
+              0.3489583333333333,
+              0.99921875,
+              0.9895833333333334
+            ],
+            "confidence": 0.3806108832359314,
+            "label": "dining table"
+          }
+        ],
+        "height": 960,
+        "inference": {
+          "cache_key": "21a49589913bcd41f73e4990785f89b74a96b16b3a8dd23ec0ad2d23a02ab847",
+          "configuration_digest": "03e124fdfc190d5d20f9285a49250078608b58cda13e8481dc7401d9f8a152e9",
+          "lookup_and_dispatch_ms": 113.11029200442135,
+          "observation_id": "cd703625-117d-4a40-aec5-b451ca90b059",
+          "observed_at": "2026-09-26T20:05:41.369967-04:00",
+          "provider_latency_ms": 101.74916696269065,
+          "source": "provider"
+        },
+        "media_type": "image/jpeg",
+        "model": {
+          "confidence_threshold": 0.25,
+          "model_id": "coco/39",
+          "normalizer_version": "rf-xyxy-v1",
+          "provider": "roboflow"
+        },
+        "t_ms": 0,
+        "width": 1280
+      },
+      "observed_relation": "right",
+      "relation_correct": true,
+      "sha256": "57f5a20ddcf94c6188e8f943abe854c25863b409f0d142f3cefb28d81bde22bc",
+      "source_file": "book_right_of_cup.jpeg",
+      "status": "observed"
+    },
+    "mug_left_of_book.jpeg": {
+      "diagnostic": {
+        "accepted": true,
+        "checks": [
+          {
+            "detail": "Both classes have one sufficiently confident detection in every observation.",
+            "name": "visible_unambiguous_objects",
+            "passed": true
+          },
+          {
+            "detail": "Keep the same image orientation and crop.",
+            "name": "image_aspect",
+            "passed": true
+          },
+          {
+            "detail": "This check requires exactly one saved image.",
+            "name": "single_image",
+            "passed": true
+          },
+          {
+            "detail": "Place the cup clearly to the left of the book, with visible space between them.",
+            "name": "requested_relation",
+            "passed": true
+          }
+        ],
+        "code": "accepted",
+        "evidence": {
+          "can_complete_pair": false,
+          "limitations": [
+            "Checks use detector observations, which can be wrong or miss objects.",
+            "Relations are measured in the image plane, not physical 3-D space.",
+            "Object positions and sizes check named controls; they cannot prove that the camera, lighting, background, or every other scene detail stayed unchanged.",
+            "Matching a class across captures does not establish the identity of a physical object."
+          ],
+          "object_a": "cup",
+          "object_b": "book",
+          "observations": [
+            {
+              "asset_id": "adb8bf97a53e22fb90bcbc7d9677ab107c811053308fecfe0db22fc3763b041f",
+              "height": 960,
+              "objects": {
+                "book": {
+                  "box": [
+                    0.590625,
+                    0.43020833333333336,
+                    0.84375,
+                    0.6760416666666667
+                  ],
+                  "center": [
+                    0.7171875,
+                    0.553125
+                  ],
+                  "confidence": 0.9543218016624451,
+                  "size": [
+                    0.25312500000000004,
+                    0.2458333333333333
+                  ]
+                },
+                "cup": {
+                  "box": [
+                    0.25390625,
+                    0.3614583333333333,
+                    0.44765625,
+                    0.6072916666666667
+                  ],
+                  "center": [
+                    0.35078125,
+                    0.484375
+                  ],
+                  "confidence": 0.9574490189552307,
+                  "size": [
+                    0.19374999999999998,
+                    0.24583333333333335
+                  ]
+                }
+              },
+              "t_ms": 0.0,
+              "width": 1280
+            }
+          ],
+          "recipe": "spatial",
+          "relation": "left",
+          "slot": "baseline",
+          "thresholds": {
+            "ambiguity_confidence": 0.35,
+            "anchor_center_tolerance": 0.035,
+            "anchor_scale_tolerance": 0.15,
+            "aspect_ratio_tolerance": 0.02,
+            "image_border_inset": 0.01,
+            "minimum_confidence": 0.6,
+            "minimum_object_dimension": 0.025,
+            "moving_scale_tolerance": 0.2,
+            "relation_box_gap": 0.02,
+            "relation_center_separation": 0.18,
+            "spatial_vertical_tolerance": 0.05,
+            "temporal_boundary_guard": 0.025,
+            "temporal_lane_tolerance": 0.055,
+            "temporal_max_duration_ms": 12000,
+            "temporal_max_frames": 48,
+            "temporal_max_gap_ms": 600,
+            "temporal_min_frames": 8,
+            "temporal_min_lane_separation": 0.2,
+            "temporal_min_order_margin_ms": 150,
+            "temporal_min_stable_ms": 150,
+            "temporal_pair_position_tolerance": 0.05,
+            "temporal_stable_position_tolerance": 0.035,
+            "temporal_start_max_x": 0.42,
+            "temporal_target_min_x": 0.62
+          }
+        },
+        "message": "The spatial relation and named controls passed.",
+        "verifier_version": "counterpart-verifier/1.0.0"
+      },
+      "expected_relation": "left",
+      "job_key": "whatsup-controlled-b-six-v1:mug_left_of_book.jpeg",
+      "object_a": "cup",
+      "object_b": "book",
+      "observation": {
+        "asset_id": "adb8bf97a53e22fb90bcbc7d9677ab107c811053308fecfe0db22fc3763b041f",
+        "bytes": 178704,
+        "detections": [
+          {
+            "box": [
+              0.25390625,
+              0.3614583333333333,
+              0.44765625,
+              0.6072916666666667
+            ],
+            "confidence": 0.9574490189552307,
+            "label": "cup"
+          },
+          {
+            "box": [
+              0.590625,
+              0.43020833333333336,
+              0.84375,
+              0.6760416666666667
+            ],
+            "confidence": 0.9543218016624451,
+            "label": "book"
+          },
+          {
+            "box": [
+              0.0015625,
+              0.3145833333333333,
+              1.0,
+              0.9885416666666667
+            ],
+            "confidence": 0.5123159885406494,
+            "label": "dining table"
+          }
+        ],
+        "height": 960,
+        "inference": {
+          "cache_key": "61b475c958b1ccb9892dbccc7c4d1a31cc3f71cf9b7e0768af6c6d59cee236a5",
+          "configuration_digest": "03e124fdfc190d5d20f9285a49250078608b58cda13e8481dc7401d9f8a152e9",
+          "lookup_and_dispatch_ms": 108.73849992640316,
+          "observation_id": "9dfa0017-33d1-457c-90ea-38e096f1fa4f",
+          "observed_at": "2026-09-26T20:05:41.483506-04:00",
+          "provider_latency_ms": 97.1942920004949,
+          "source": "provider"
+        },
+        "media_type": "image/jpeg",
+        "model": {
+          "confidence_threshold": 0.25,
+          "model_id": "coco/39",
+          "normalizer_version": "rf-xyxy-v1",
+          "provider": "roboflow"
+        },
+        "t_ms": 0,
+        "width": 1280
+      },
+      "observed_relation": "left",
+      "relation_correct": true,
+      "sha256": "adb8bf97a53e22fb90bcbc7d9677ab107c811053308fecfe0db22fc3763b041f",
+      "source_file": "mug_left_of_book.jpeg",
+      "status": "observed"
+    },
+    "mug_left_of_phone.jpeg": {
+      "diagnostic": {
+        "accepted": true,
+        "checks": [
+          {
+            "detail": "Both classes have one sufficiently confident detection in every observation.",
+            "name": "visible_unambiguous_objects",
+            "passed": true
+          },
+          {
+            "detail": "Keep the same image orientation and crop.",
+            "name": "image_aspect",
+            "passed": true
+          },
+          {
+            "detail": "This check requires exactly one saved image.",
+            "name": "single_image",
+            "passed": true
+          },
+          {
+            "detail": "Place the cup clearly to the left of the cell phone, with visible space between them.",
+            "name": "requested_relation",
+            "passed": true
+          }
+        ],
+        "code": "accepted",
+        "evidence": {
+          "can_complete_pair": false,
+          "limitations": [
+            "Checks use detector observations, which can be wrong or miss objects.",
+            "Relations are measured in the image plane, not physical 3-D space.",
+            "Object positions and sizes check named controls; they cannot prove that the camera, lighting, background, or every other scene detail stayed unchanged.",
+            "Matching a class across captures does not establish the identity of a physical object."
+          ],
+          "object_a": "cup",
+          "object_b": "cell phone",
+          "observations": [
+            {
+              "asset_id": "f287bbd11093d2fe73e0833188fa453475356a4f18627d3e656bf54bb2db48bf",
+              "height": 960,
+              "objects": {
+                "cell phone": {
+                  "box": [
+                    0.60625,
+                    0.509375,
+                    0.7546875,
+                    0.6916666666666667
+                  ],
+                  "center": [
+                    0.68046875,
+                    0.6005208333333334
+                  ],
+                  "confidence": 0.9570066332817078,
+                  "size": [
+                    0.1484375,
+                    0.18229166666666663
+                  ]
+                },
+                "cup": {
+                  "box": [
+                    0.18359375,
+                    0.35833333333333334,
+                    0.37578125,
+                    0.6052083333333333
+                  ],
+                  "center": [
+                    0.2796875,
+                    0.48177083333333337
+                  ],
+                  "confidence": 0.9617547988891602,
+                  "size": [
+                    0.1921875,
+                    0.246875
+                  ]
+                }
+              },
+              "t_ms": 0.0,
+              "width": 1280
+            }
+          ],
+          "recipe": "spatial",
+          "relation": "left",
+          "slot": "baseline",
+          "thresholds": {
+            "ambiguity_confidence": 0.35,
+            "anchor_center_tolerance": 0.035,
+            "anchor_scale_tolerance": 0.15,
+            "aspect_ratio_tolerance": 0.02,
+            "image_border_inset": 0.01,
+            "minimum_confidence": 0.6,
+            "minimum_object_dimension": 0.025,
+            "moving_scale_tolerance": 0.2,
+            "relation_box_gap": 0.02,
+            "relation_center_separation": 0.18,
+            "spatial_vertical_tolerance": 0.05,
+            "temporal_boundary_guard": 0.025,
+            "temporal_lane_tolerance": 0.055,
+            "temporal_max_duration_ms": 12000,
+            "temporal_max_frames": 48,
+            "temporal_max_gap_ms": 600,
+            "temporal_min_frames": 8,
+            "temporal_min_lane_separation": 0.2,
+            "temporal_min_order_margin_ms": 150,
+            "temporal_min_stable_ms": 150,
+            "temporal_pair_position_tolerance": 0.05,
+            "temporal_stable_position_tolerance": 0.035,
+            "temporal_start_max_x": 0.42,
+            "temporal_target_min_x": 0.62
+          }
+        },
+        "message": "The spatial relation and named controls passed.",
+        "verifier_version": "counterpart-verifier/1.0.0"
+      },
+      "expected_relation": "left",
+      "job_key": "whatsup-controlled-b-six-v1:mug_left_of_phone.jpeg",
+      "object_a": "cup",
+      "object_b": "cell phone",
+      "observation": {
+        "asset_id": "f287bbd11093d2fe73e0833188fa453475356a4f18627d3e656bf54bb2db48bf",
+        "bytes": 168749,
+        "detections": [
+          {
+            "box": [
+              0.18359375,
+              0.35833333333333334,
+              0.37578125,
+              0.6052083333333333
+            ],
+            "confidence": 0.9617547988891602,
+            "label": "cup"
+          },
+          {
+            "box": [
+              0.60625,
+              0.509375,
+              0.7546875,
+              0.6916666666666667
+            ],
+            "confidence": 0.9570066332817078,
+            "label": "cell phone"
+          },
+          {
+            "box": [
+              0.00078125,
+              0.3145833333333333,
+              1.0,
+              0.9885416666666667
+            ],
+            "confidence": 0.47169622778892517,
+            "label": "dining table"
+          }
+        ],
+        "height": 960,
+        "inference": {
+          "cache_key": "bb85fa41dcce119e6ccbe6616e77bb84e8a0941fcb6e9cd9c7df63d76d778ddf",
+          "configuration_digest": "03e124fdfc190d5d20f9285a49250078608b58cda13e8481dc7401d9f8a152e9",
+          "lookup_and_dispatch_ms": 87.34662504866719,
+          "observation_id": "af023813-2930-4b81-b91e-5034a20d0ee0",
+          "observed_at": "2026-09-26T20:05:41.675418-04:00",
+          "provider_latency_ms": 74.72150004468858,
+          "source": "provider"
+        },
+        "media_type": "image/jpeg",
+        "model": {
+          "confidence_threshold": 0.25,
+          "model_id": "coco/39",
+          "normalizer_version": "rf-xyxy-v1",
+          "provider": "roboflow"
+        },
+        "t_ms": 0,
+        "width": 1280
+      },
+      "observed_relation": "left",
+      "relation_correct": true,
+      "sha256": "f287bbd11093d2fe73e0833188fa453475356a4f18627d3e656bf54bb2db48bf",
+      "source_file": "mug_left_of_phone.jpeg",
+      "status": "observed"
+    },
+    "mug_right_of_book.jpeg": {
+      "diagnostic": {
+        "accepted": false,
+        "checks": [
+          {
+            "detail": "Both classes have one sufficiently confident detection in every observation.",
+            "name": "visible_unambiguous_objects",
+            "passed": true
+          },
+          {
+            "detail": "Keep the same image orientation and crop.",
+            "name": "image_aspect",
+            "passed": true
+          },
+          {
+            "detail": "This check requires exactly one saved image.",
+            "name": "single_image",
+            "passed": true
+          },
+          {
+            "detail": "Place the cup clearly to the left of the book, with visible space between them.",
+            "name": "requested_relation",
+            "passed": false
+          }
+        ],
+        "code": "wrong_relation",
+        "evidence": {
+          "can_complete_pair": false,
+          "limitations": [
+            "Checks use detector observations, which can be wrong or miss objects.",
+            "Relations are measured in the image plane, not physical 3-D space.",
+            "Object positions and sizes check named controls; they cannot prove that the camera, lighting, background, or every other scene detail stayed unchanged.",
+            "Matching a class across captures does not establish the identity of a physical object."
+          ],
+          "object_a": "cup",
+          "object_b": "book",
+          "observations": [
+            {
+              "asset_id": "57253d734b0869a37f8d5faa77275b51b02f2ca3b330d8de861630e8d41c28c2",
+              "height": 960,
+              "objects": {
+                "book": {
+                  "box": [
+                    0.24765625,
+                    0.42291666666666666,
+                    0.45859375,
+                    0.659375
+                  ],
+                  "center": [
+                    0.353125,
+                    0.5411458333333333
+                  ],
+                  "confidence": 0.9514641165733337,
+                  "size": [
+                    0.21093750000000003,
+                    0.23645833333333338
+                  ]
+                },
+                "cup": {
+                  "box": [
+                    0.58515625,
+                    0.35208333333333336,
+                    0.7765625,
+                    0.5927083333333333
+                  ],
+                  "center": [
+                    0.680859375,
+                    0.47239583333333335
+                  ],
+                  "confidence": 0.9574522972106934,
+                  "size": [
+                    0.19140625,
+                    0.24062499999999992
+                  ]
+                }
+              },
+              "t_ms": 0.0,
+              "width": 1280
+            }
+          ],
+          "recipe": "spatial",
+          "relation": "right",
+          "slot": "baseline",
+          "thresholds": {
+            "ambiguity_confidence": 0.35,
+            "anchor_center_tolerance": 0.035,
+            "anchor_scale_tolerance": 0.15,
+            "aspect_ratio_tolerance": 0.02,
+            "image_border_inset": 0.01,
+            "minimum_confidence": 0.6,
+            "minimum_object_dimension": 0.025,
+            "moving_scale_tolerance": 0.2,
+            "relation_box_gap": 0.02,
+            "relation_center_separation": 0.18,
+            "spatial_vertical_tolerance": 0.05,
+            "temporal_boundary_guard": 0.025,
+            "temporal_lane_tolerance": 0.055,
+            "temporal_max_duration_ms": 12000,
+            "temporal_max_frames": 48,
+            "temporal_max_gap_ms": 600,
+            "temporal_min_frames": 8,
+            "temporal_min_lane_separation": 0.2,
+            "temporal_min_order_margin_ms": 150,
+            "temporal_min_stable_ms": 150,
+            "temporal_pair_position_tolerance": 0.05,
+            "temporal_stable_position_tolerance": 0.035,
+            "temporal_start_max_x": 0.42,
+            "temporal_target_min_x": 0.62
+          }
+        },
+        "message": "Place the cup clearly to the left of the book, with visible space between them.",
+        "verifier_version": "counterpart-verifier/1.0.0"
+      },
+      "expected_relation": "right",
+      "job_key": "whatsup-controlled-b-six-v1:mug_right_of_book.jpeg",
+      "object_a": "cup",
+      "object_b": "book",
+      "observation": {
+        "asset_id": "57253d734b0869a37f8d5faa77275b51b02f2ca3b330d8de861630e8d41c28c2",
+        "bytes": 174626,
+        "detections": [
+          {
+            "box": [
+              0.58515625,
+              0.35208333333333336,
+              0.7765625,
+              0.5927083333333333
+            ],
+            "confidence": 0.9574522972106934,
+            "label": "cup"
+          },
+          {
+            "box": [
+              0.24765625,
+              0.42291666666666666,
+              0.45859375,
+              0.659375
+            ],
+            "confidence": 0.9514641165733337,
+            "label": "book"
+          },
+          {
+            "box": [
+              0.00078125,
+              0.31354166666666666,
+              1.0,
+              0.9875
+            ],
+            "confidence": 0.6843863129615784,
+            "label": "dining table"
+          }
+        ],
+        "height": 960,
+        "inference": {
+          "cache_key": "610645a866df322521a903da202abbfacc92f0a19aa289814b5ab5e042e0dd44",
+          "configuration_digest": "03e124fdfc190d5d20f9285a49250078608b58cda13e8481dc7401d9f8a152e9",
+          "lookup_and_dispatch_ms": 94.31820805184543,
+          "observation_id": "4f539026-8e99-4e21-80c6-981bc5879c8e",
+          "observed_at": "2026-09-26T20:05:41.582008-04:00",
+          "provider_latency_ms": 83.38183409068733,
+          "source": "provider"
+        },
+        "media_type": "image/jpeg",
+        "model": {
+          "confidence_threshold": 0.25,
+          "model_id": "coco/39",
+          "normalizer_version": "rf-xyxy-v1",
+          "provider": "roboflow"
+        },
+        "t_ms": 0,
+        "width": 1280
+      },
+      "observed_relation": "right",
+      "relation_correct": true,
+      "sha256": "57253d734b0869a37f8d5faa77275b51b02f2ca3b330d8de861630e8d41c28c2",
+      "source_file": "mug_right_of_book.jpeg",
+      "status": "observed"
+    },
+    "mug_right_of_phone.jpeg": {
+      "diagnostic": {
+        "accepted": false,
+        "checks": [
+          {
+            "detail": "Both classes have one sufficiently confident detection in every observation.",
+            "name": "visible_unambiguous_objects",
+            "passed": true
+          },
+          {
+            "detail": "Keep the same image orientation and crop.",
+            "name": "image_aspect",
+            "passed": true
+          },
+          {
+            "detail": "This check requires exactly one saved image.",
+            "name": "single_image",
+            "passed": true
+          },
+          {
+            "detail": "Place the cup clearly to the left of the cell phone, with visible space between them.",
+            "name": "requested_relation",
+            "passed": false
+          }
+        ],
+        "code": "wrong_relation",
+        "evidence": {
+          "can_complete_pair": false,
+          "limitations": [
+            "Checks use detector observations, which can be wrong or miss objects.",
+            "Relations are measured in the image plane, not physical 3-D space.",
+            "Object positions and sizes check named controls; they cannot prove that the camera, lighting, background, or every other scene detail stayed unchanged.",
+            "Matching a class across captures does not establish the identity of a physical object."
+          ],
+          "object_a": "cup",
+          "object_b": "cell phone",
+          "observations": [
+            {
+              "asset_id": "a3296ad0bd67d51e10250cb2ada5a9fabaaa5d7e1fe316225f07c005e2e65c82",
+              "height": 960,
+              "objects": {
+                "cell phone": {
+                  "box": [
+                    0.23984375,
+                    0.51875,
+                    0.39609375,
+                    0.7083333333333334
+                  ],
+                  "center": [
+                    0.31796875,
+                    0.6135416666666667
+                  ],
+                  "confidence": 0.9334166646003723,
+                  "size": [
+                    0.15625000000000003,
+                    0.18958333333333333
+                  ]
+                },
+                "cup": {
+                  "box": [
+                    0.578125,
+                    0.3958333333333333,
+                    0.796875,
+                    0.66875
+                  ],
+                  "center": [
+                    0.6875,
+                    0.5322916666666666
+                  ],
+                  "confidence": 0.9631214737892151,
+                  "size": [
+                    0.21875,
+                    0.27291666666666664
+                  ]
+                }
+              },
+              "t_ms": 0.0,
+              "width": 1280
+            }
+          ],
+          "recipe": "spatial",
+          "relation": "right",
+          "slot": "baseline",
+          "thresholds": {
+            "ambiguity_confidence": 0.35,
+            "anchor_center_tolerance": 0.035,
+            "anchor_scale_tolerance": 0.15,
+            "aspect_ratio_tolerance": 0.02,
+            "image_border_inset": 0.01,
+            "minimum_confidence": 0.6,
+            "minimum_object_dimension": 0.025,
+            "moving_scale_tolerance": 0.2,
+            "relation_box_gap": 0.02,
+            "relation_center_separation": 0.18,
+            "spatial_vertical_tolerance": 0.05,
+            "temporal_boundary_guard": 0.025,
+            "temporal_lane_tolerance": 0.055,
+            "temporal_max_duration_ms": 12000,
+            "temporal_max_frames": 48,
+            "temporal_max_gap_ms": 600,
+            "temporal_min_frames": 8,
+            "temporal_min_lane_separation": 0.2,
+            "temporal_min_order_margin_ms": 150,
+            "temporal_min_stable_ms": 150,
+            "temporal_pair_position_tolerance": 0.05,
+            "temporal_stable_position_tolerance": 0.035,
+            "temporal_start_max_x": 0.42,
+            "temporal_target_min_x": 0.62
+          }
+        },
+        "message": "Place the cup clearly to the left of the cell phone, with visible space between them.",
+        "verifier_version": "counterpart-verifier/1.0.0"
+      },
+      "expected_relation": "right",
+      "job_key": "whatsup-controlled-b-six-v1:mug_right_of_phone.jpeg",
+      "object_a": "cup",
+      "object_b": "cell phone",
+      "observation": {
+        "asset_id": "a3296ad0bd67d51e10250cb2ada5a9fabaaa5d7e1fe316225f07c005e2e65c82",
+        "bytes": 157754,
+        "detections": [
+          {
+            "box": [
+              0.578125,
+              0.3958333333333333,
+              0.796875,
+              0.66875
+            ],
+            "confidence": 0.9631214737892151,
+            "label": "cup"
+          },
+          {
+            "box": [
+              0.23984375,
+              0.51875,
+              0.39609375,
+              0.7083333333333334
+            ],
+            "confidence": 0.9334166646003723,
+            "label": "cell phone"
+          },
+          {
+            "box": [
+              0.0015625,
+              0.321875,
+              0.99921875,
+              0.9885416666666667
+            ],
+            "confidence": 0.4660991430282593,
+            "label": "dining table"
+          }
+        ],
+        "height": 960,
+        "inference": {
+          "cache_key": "d29de3d38c5c50d696ed650f7c4e06e7789bcea38ff5c33828a3144e7de156e8",
+          "configuration_digest": "03e124fdfc190d5d20f9285a49250078608b58cda13e8481dc7401d9f8a152e9",
+          "lookup_and_dispatch_ms": 91.16499999072403,
+          "observation_id": "7a5e8370-259b-4fc3-846f-ba04a72453b0",
+          "observed_at": "2026-09-26T20:05:41.772650-04:00",
+          "provider_latency_ms": 77.85195903852582,
+          "source": "provider"
+        },
+        "media_type": "image/jpeg",
+        "model": {
+          "confidence_threshold": 0.25,
+          "model_id": "coco/39",
+          "normalizer_version": "rf-xyxy-v1",
+          "provider": "roboflow"
+        },
+        "t_ms": 0,
+        "width": 1280
+      },
+      "observed_relation": "right",
+      "relation_correct": true,
+      "sha256": "a3296ad0bd67d51e10250cb2ada5a9fabaaa5d7e1fe316225f07c005e2e65c82",
+      "source_file": "mug_right_of_phone.jpeg",
+      "status": "observed"
+    }
+  },
+  "purpose": "Six-photo hosted relation diagnostic and fixed-anchor negative controls.",
+  "retries_per_image": 0,
+  "run_id": "whatsup-controlled-b-six-v1",
+  "schema_version": "counterpart.public-photo-probe.v1",
+  "source": {
+    "archive_drive_id": "13jdBpg8t3NqW3jrL6FK8HO93vwsUjDxG",
+    "files": [
+      {
+        "bytes": 159804,
+        "path": "book_left_of_cup.jpeg",
+        "sha256": "0f1a76ed072600016caf50674bcfa8b56933d66f35cab9b7a838a964ff8fba73",
+        "source_member": "controlled_clevr/book_left_of_cup.jpeg"
+      },
+      {
+        "bytes": 150307,
+        "path": "book_right_of_cup.jpeg",
+        "sha256": "57f5a20ddcf94c6188e8f943abe854c25863b409f0d142f3cefb28d81bde22bc",
+        "source_member": "controlled_clevr/book_right_of_cup.jpeg"
+      },
+      {
+        "bytes": 157754,
+        "path": "mug_right_of_phone.jpeg",
+        "sha256": "a3296ad0bd67d51e10250cb2ada5a9fabaaa5d7e1fe316225f07c005e2e65c82",
+        "source_member": "controlled_clevr/mug_right_of_phone.jpeg"
+      },
+      {
+        "bytes": 168749,
+        "path": "mug_left_of_phone.jpeg",
+        "sha256": "f287bbd11093d2fe73e0833188fa453475356a4f18627d3e656bf54bb2db48bf",
+        "source_member": "controlled_clevr/mug_left_of_phone.jpeg"
+      },
+      {
+        "bytes": 178704,
+        "path": "mug_left_of_book.jpeg",
+        "sha256": "adb8bf97a53e22fb90bcbc7d9677ab107c811053308fecfe0db22fc3763b041f",
+        "source_member": "controlled_clevr/mug_left_of_book.jpeg"
+      },
+      {
+        "bytes": 174626,
+        "path": "mug_right_of_book.jpeg",
+        "sha256": "57253d734b0869a37f8d5faa77275b51b02f2ca3b330d8de861630e8d41c28c2",
+        "source_member": "controlled_clevr/mug_right_of_book.jpeg"
+      }
+    ],
+    "license_note": "Official code/data repository MIT license; no separate image-specific license found. Keep internal probe, do not redistribute.",
+    "selection": "book vs cup, mug vs book, mug vs phone; left/right only; selected before inference",
+    "source_commit": "7c1f2550eace32e7b8c77de5a792347c402960d1",
+    "source_repository": "https://github.com/amitakamath/whatsup_vlms",
+    "subset": "Controlled Images B"
+  },
+  "status": "complete",
+  "thresholds": {
+    "ambiguity_confidence": 0.35,
+    "anchor_center_tolerance": 0.035,
+    "anchor_scale_tolerance": 0.15,
+    "aspect_ratio_tolerance": 0.02,
+    "image_border_inset": 0.01,
+    "minimum_confidence": 0.6,
+    "minimum_object_dimension": 0.025,
+    "moving_scale_tolerance": 0.2,
+    "relation_box_gap": 0.02,
+    "relation_center_separation": 0.18,
+    "spatial_vertical_tolerance": 0.05,
+    "temporal_boundary_guard": 0.025,
+    "temporal_lane_tolerance": 0.055,
+    "temporal_max_duration_ms": 12000,
+    "temporal_max_frames": 48,
+    "temporal_max_gap_ms": 600,
+    "temporal_min_frames": 8,
+    "temporal_min_lane_separation": 0.2,
+    "temporal_min_order_margin_ms": 150,
+    "temporal_min_stable_ms": 150,
+    "temporal_pair_position_tolerance": 0.05,
+    "temporal_stable_position_tolerance": 0.035,
+    "temporal_start_max_x": 0.42,
+    "temporal_target_min_x": 0.62
+  },
+  "verifier_version": "counterpart-verifier/1.0.0"
+}

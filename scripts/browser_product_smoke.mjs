@@ -1,0 +1,95 @@
+// Full product journey against the actual API/PostgreSQL/worker; perception uses labeled fixtures.
+import { createRequire } from 'node:module';
+import { mkdir, writeFile } from 'node:fs/promises';
+const require = createRequire(new URL('../web/package.json', import.meta.url));
+const { chromium, expect } = require('@playwright/test');
+const base = process.env.COUNTERPART_BASE_URL || 'http://127.0.0.1:8080';
+const output = new URL('../artifacts/', import.meta.url);
+await mkdir(output, { recursive: true });
+const browser = await chromium.launch({ headless: true });
+const scenarios = [];
+try {
+  for (const recipe of ['spatial', 'temporal']) {
+    const errors = [];
+    const operatorContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    const page = await operatorContext.newPage();
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(`${base}/#/workspace`);
+    await page.getByRole('button', { name: /^New collection/ }).click();
+    await page.getByLabel('Collection name', { exact: true }).fill(`Browser ${recipe} ${Date.now()}`);
+    if (recipe === 'temporal') await page.getByRole('button', { name: /Reverse arrival order/ }).click();
+    await page.getByLabel('Collection source').selectOption('replay');
+    await page.getByLabel('Approved pair target').fill('3');
+    await page.getByRole('button', { name: /^Create collection/ }).click();
+    await page.getByRole('tab', { name: 'Invite collectors' }).click();
+    await page.getByLabel('Maximum sessions').fill('2');
+    await page.getByRole('button', { name: /^Create collector invitation/ }).click();
+    const link = await page.getByLabel('Collector invitation link').inputValue();
+    const collectorContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    const collector = await collectorContext.newPage();
+    collector.on('pageerror', error => errors.push(error.message));
+    await collector.goto(link);
+    await collector.getByRole('button', { name: /^Start collecting/ }).click();
+    const first = recipe === 'spatial' ? 'Capture the first image' : 'Record first sequence';
+    const second = recipe === 'spatial' ? 'Capture the counterpart' : 'Record reverse sequence';
+    await collector.getByRole('button', { name: first, exact: true }).click();
+    await expect(collector.getByRole('button', { name: second, exact: true })).toBeEnabled({ timeout: 15000 });
+    await collector.getByRole('button', { name: recipe === 'spatial' ? 'Move the reference' : 'Wrong order', exact: true }).click();
+    await expect(collector.getByText('Keep the first. Fix this one.', { exact: true })).toBeVisible({ timeout: 15000 });
+    await collector.screenshot({ path: new URL(`product-${recipe}-repair.png`, output).pathname, fullPage: true });
+    await collector.reload();
+    await collector.getByRole('button', { name: 'Check current scene', exact: true }).click();
+    await expect(collector.getByRole('button', { name: second, exact: true })).toBeEnabled({ timeout: 15000 });
+    await collector.getByRole('button', { name: second, exact: true }).click();
+    await expect(collector.getByRole('button', { name: 'Save the complete pair', exact: true })).toBeEnabled({ timeout: 15000 });
+    await collector.getByRole('button', { name: 'Save the complete pair', exact: true }).click();
+    await expect(collector.getByRole('button', { name: 'Download complete pair', exact: true })).toBeVisible({ timeout: 15000 });
+    await collector.goto(`${base}/#/library`);
+    await expect(collector.getByRole('button', { name: /^Open session/ })).toHaveCount(1);
+    await collector.reload();
+    await expect(collector.getByRole('button', { name: /^Open session/ })).toHaveCount(1);
+    await collector.setViewportSize({ width: 390, height: 844 });
+    await collector.screenshot({ path: new URL(`product-${recipe}-library-mobile.png`, output).pathname, fullPage: true });
+    if (await collector.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)) throw new Error('Collector library overflow');
+
+    const secondContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const partial = await secondContext.newPage();
+    partial.on('pageerror', error => errors.push(error.message));
+    await partial.goto(link);
+    await partial.getByRole('button', { name: /^Start collecting/ }).click();
+    await partial.getByRole('button', { name: first, exact: true }).click();
+    await expect(partial.getByRole('button', { name: second, exact: true })).toBeEnabled({ timeout: 15000 });
+    await partial.reload();
+    await expect(partial.getByRole('button', { name: 'Check current scene', exact: true })).toBeVisible({ timeout: 15000 });
+    await page.getByRole('tab', { name: /Sessions/ }).click();
+    await expect(page.getByRole('button', { name: 'Inspect', exact: true })).toHaveCount(2, { timeout: 15000 });
+    await page.getByRole('button', { name: 'Inspect', exact: true }).first().click();
+    await expect(page.getByText(/Saved state:/)).toBeVisible();
+    await page.getByRole('tab', { name: /Review pairs/ }).click();
+    await page.getByRole('button', { name: /^Review evidence/ }).click();
+    await expect(page.locator('.review-panel')).toBeVisible();
+    await page.screenshot({ path: new URL(`product-${recipe}-review.png`, output).pathname, fullPage: true });
+    await page.getByRole('button', { name: /^Approve pair/ }).click();
+    await expect(page.locator('.review-panel')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Select approved', exact: true }).click();
+    await page.getByRole('checkbox', { name: /Create a labeled test release/ }).check();
+    await page.getByRole('button', { name: /^Create dataset release/ }).click();
+    await expect(page.getByRole('button', { name: /^Download dataset ZIP/ })).toBeVisible({ timeout: 15000 });
+    const downloadEvent = page.waitForEvent('download');
+    await page.getByRole('button', { name: /^Download dataset ZIP/ }).click();
+    const download = await downloadEvent;
+    await download.saveAs(new URL(`product-${recipe}-dataset.zip`, output).pathname);
+    await page.screenshot({ path: new URL(`product-${recipe}-release.png`, output).pathname, fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: new URL(`product-${recipe}-release-mobile.png`, output).pathname, fullPage: true });
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+    if (errors.length || overflow) throw new Error(JSON.stringify({ recipe, errors, overflow }));
+    scenarios.push({ recipe, passed: true, separate_collector_contexts: 2, incomplete_session_discoverable: true,
+      rejected_attempt_repaired_after_reload: true, durable_local_library: true, independent_review_action: true,
+      released_zip_downloaded: true, mobile_horizontal_overflow: false, browser_errors: errors });
+    await operatorContext.close(); await collectorContext.close(); await secondContext.close();
+  }
+  const report = { kind: 'Actual product UI/API/PostgreSQL/worker; labeled fixture observations, no model calls', scenarios };
+  await writeFile(new URL('browser_product_smoke.json', output), JSON.stringify(report, null, 2)+'\n');
+  console.log(JSON.stringify(report));
+} finally { await browser.close(); }

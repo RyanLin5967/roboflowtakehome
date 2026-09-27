@@ -1,0 +1,74 @@
+{
+  "recorded_at": "2026-09-27T00:12:00.896494+00:00",
+  "schema_version": "counterpart.product-fault-probe.v1",
+  "evidence_kind": "deterministic infrastructure replay, not CV accuracy",
+  "environment": {
+    "python": "3.12.13",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "postgres": "PostgreSQL 17.11 (Homebrew) on aarch64-apple-darwin25.6.0, compiled by Apple clang version 21.0.0 (clang-2100.1.1.101), 64-bit",
+    "logical_cpus": 18
+  },
+  "limitations": [
+    "Eight synthetic collectors, not real people; no sustained-capacity claim.",
+    "Generated illustrations and declared detections; no ML model executed.",
+    "Worker crashes are real subprocess deaths; lease expiry is accelerated by test SQL.",
+    "Fake HTTP calls and budget reservations occur only in a temporary test schema.",
+    "No shared database restart, provider requests, private credentials, or billing."
+  ],
+  "collection_product": {
+    "campaigns": 2,
+    "collectors": 8,
+    "join_requests_including_retries": 16,
+    "sessions_created": 8,
+    "actual_worker_process_kills": 1,
+    "other_sessions_completed_while_dead_worker_lease_active": 7,
+    "worker_recovery_after_injected_lease_expiry_ms": 12.689,
+    "old_worker_result_rejected": true,
+    "baseline_survives_reconnect": true,
+    "scene_recovery_required_and_completed": true,
+    "stale_epoch_preview_rejected": true,
+    "previews_submitted": 85,
+    "pending_after_burst": 8,
+    "collectors_served_latest_preview": 8,
+    "preview_burst_and_drain_seconds": 0.464,
+    "submit_ms_p50": 3.764,
+    "submit_ms_p95": 28.425,
+    "deliberately_rejected_counterparts": 1,
+    "published_pairs": 8,
+    "publish_requests_including_retries": 16,
+    "review_requests_including_retries": 16,
+    "unique_releases": 2,
+    "release_requests_including_retries": 8,
+    "pairs_per_release": [
+      4,
+      4
+    ],
+    "pair_membership_and_splits_intact": true,
+    "released_review_snapshot_survives_revision": true,
+    "revoked_invite_rejected": true,
+    "cloud_export_claimable": false
+  },
+  "durable_inference_recovery": {
+    "provider_kind": "localhost fake HTTP responses from generated fixture declarations",
+    "cloud_calls": 0,
+    "local_model_calls": 0,
+    "sampled_frames": 10,
+    "actual_worker_process_exits_before_acceptance": 1,
+    "durable_observations_before_process_exit": 10,
+    "additional_http_requests_on_recovery": 0,
+    "reservation_units_before": 10,
+    "reservation_units_after": 10,
+    "original_capture_and_timestamps_preserved": true,
+    "all_recovered_observations_from_cache": true,
+    "recovery_after_injected_lease_expiry_ms": 38.991,
+    "cache_stats": {
+      "cached_assets": 10,
+      "cache_reuses": 10,
+      "waiting_frames": 0,
+      "dispatch_attempts": {
+        "succeeded": 10
+      }
+    }
+  },
+  "total_wall_seconds": 3.017
+}
