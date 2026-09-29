@@ -25,7 +25,9 @@ from .repository import Conflict, Repository, _json
 from .splits import session_split_group, validate_split_group
 from .verification import verify
 
-TARGET_VERSION = "2.1.0"
+TARGET_VERSION = "2.2.0"
+SOURCE_VERSIONS = frozenset({"2.0.0", "2.1.0"})
+RECEIPT_VERSIONS = frozenset({"2.1.0", "2.2.0"})
 
 
 def derived_token(parent_token: str, session_id: str, idempotency_key: str) -> str:
@@ -46,9 +48,20 @@ class PairRecheck:
         ).fetchone()
         if row is None:
             return None
-        if row["data"]["request"] != request:
+        recorded = row["data"]["request"]
+        # The caller supplies revision/epoch, not a target verifier version.
+        # A response lost before a server upgrade must recover its original
+        # child rather than silently executing a different version or forking
+        # another collection. New request keys use today's target version.
+        if recorded.get("recipe_version") not in RECEIPT_VERSIONS or {
+            key: value for key, value in recorded.items() if key != "recipe_version"
+        } != {key: value for key, value in request.items() if key != "recipe_version"}:
             raise Conflict("idempotency_mismatch", "This recheck key belongs to another request")
         child = self.repo._session(connection, row["data"]["derived_session_id"])
+        if (child["recipe_snapshot"] or {}).get("recipe_version") != recorded["recipe_version"]:
+            raise Conflict(
+                "recheck_receipt_invalid", "The saved recheck no longer matches its recorded rules."
+            )
         if not hmac.compare_digest(child["capability_hash"], hashlib.sha256(token.encode()).hexdigest()):
             raise Conflict("idempotency_mismatch", "This recheck belongs to another capability")
         return {"token": token, "session": self.repo._snapshot(connection, str(child["id"]))}
@@ -75,7 +88,7 @@ class PairRecheck:
             execution = validate_execution_contract(session["execution_contract"], mode="live")
         except (RecipeContractError, ExecutionContractError) as error:
             raise Conflict("recheck_contract_invalid", "The saved collection contract is invalid.") from error
-        if snapshot["recipe_version"] != "2.0.0":
+        if snapshot["recipe_version"] not in SOURCE_VERSIONS:
             raise Conflict("recheck_ineligible", "This pair already uses current verification rules.")
         if connection.execute(
             "SELECT 1 FROM counterpart_jobs WHERE session_id=%s "

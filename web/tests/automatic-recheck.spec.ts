@@ -8,7 +8,7 @@ const oldToken = 'fixture-original-capability';
 const newToken = 'fixture-rechecked-capability';
 const drawing = '<svg xmlns="http://www.w3.org/2000/svg" width="720" height="440"><rect width="720" height="440" fill="#ebe7df"/><rect x="100" y="130" width="80" height="190" fill="#b87d56"/><rect x="350" y="220" width="100" height="100" fill="#738a67"/></svg>';
 
-async function savedPair(page: Page, options: { loseFirstResponse?: boolean; campaign?: boolean; human?: boolean; cupFailed?: boolean; registrationUnknown?: boolean; supported?: boolean; orientation?: 'mirrored' | 'original' | 'legacy'; allowCamera?: boolean; blockOrientationWrite?: boolean } = {}) {
+async function savedPair(page: Page, options: { sourceVersion?: '2.0.0' | '2.1.0' | '2.2.0'; loseFirstResponse?: boolean; campaign?: boolean; human?: boolean; cupFailed?: boolean; registrationUnknown?: boolean; supported?: boolean; orientation?: 'mirrored' | 'original' | 'legacy'; allowCamera?: boolean; blockOrientationWrite?: boolean } = {}) {
   const appearance = { name: 'appearance_continuity:bottle:0', passed: false, outcome: 'unknown', code: 'appearance_uncertain', detail: "The bottle's appearance comparison is inconclusive.", measurements: { histogram_distance: 0.72 } };
   const baseChecks = [
     { name: 'bottle_right_of_cup', passed: true, outcome: 'pass', code: 'relation_visible', detail: 'The bottle is right of the cup.' },
@@ -19,14 +19,14 @@ async function savedPair(page: Page, options: { loseFirstResponse?: boolean; cam
   const capture = (slot: 'baseline' | 'counterpart') => ({
     id: `original-${slot}`, slot, status: slot === 'baseline' ? 'accepted' : 'rejected', revision: slot === 'baseline' ? 1 : 2, epoch: 0,
     created_at: '2026-09-29T12:00:00Z', frames: [{ asset_id: `original-${slot}-pixels`, t_ms: 0, width: 720, height: 440 }],
-    result: { accepted: slot === 'baseline', outcome: slot === 'baseline' ? 'pass' : options.cupFailed ? 'fail' : 'unknown', hard_error: false, code: slot === 'baseline' ? 'accepted' : options.cupFailed ? 'reference_moved' : options.registrationUnknown ? 'camera_registration_unknown' : 'appearance_uncertain', message: slot === 'baseline' ? 'The first scene passes.' : 'Appearance comparison is inconclusive.', checks: slot === 'baseline' ? [baseChecks[0]] : baseChecks, evidence: {}, verifier_version: 'counterpart-verifier/2.0.0' }, error: null,
+    result: { accepted: slot === 'baseline', outcome: slot === 'baseline' ? 'pass' : options.cupFailed ? 'fail' : 'unknown', hard_error: false, code: slot === 'baseline' ? 'accepted' : options.cupFailed ? 'reference_moved' : options.registrationUnknown ? 'camera_registration_unknown' : 'appearance_uncertain', message: slot === 'baseline' ? 'The first scene passes.' : 'Appearance comparison is inconclusive.', checks: slot === 'baseline' ? [baseChecks[0]] : baseChecks, evidence: {}, verifier_version: `counterpart-verifier/${options.sourceVersion || '2.0.0'}` }, error: null,
   });
   const baseline = capture('baseline');
   const candidate = capture('counterpart');
-  const original: any = { id: oldId, recipe: 'spatial', mode: 'live', object_a: 'bottle', object_b: 'cup', revision: 2, epoch: 0, state: 'baseline_ready', recovery_required: false, baseline, counterpart: null, latest_capture: candidate, feedback: null, pair: null, events: [], campaign_id: options.campaign ? 'frozen-campaign' : null, human_review_required: !!options.human, baseline_authorization: options.human ? { id: 'human-authorization' } : null, recipe_snapshot: { recipe_version: '2.0.0', protected_objects: [] } };
+  const original: any = { id: oldId, recipe: 'spatial', mode: 'live', object_a: 'bottle', object_b: 'cup', revision: 2, epoch: 0, state: 'baseline_ready', recovery_required: false, baseline, counterpart: null, latest_capture: candidate, feedback: null, pair: null, events: [], campaign_id: options.campaign ? 'frozen-campaign' : null, human_review_required: !!options.human, baseline_authorization: options.human ? { id: 'human-authorization' } : null, recipe_snapshot: { recipe_version: options.sourceVersion || '2.0.0', protected_objects: [] } };
   const acceptedAppearance = { name: appearance.name, passed: true, outcome: 'pass', code: 'appearance_consistent', detail: 'The registered object appearance is consistent.' };
-  const acceptedCandidate = { ...candidate, id: 'rechecked-counterpart', status: 'accepted', result: { ...candidate.result, accepted: true, outcome: 'pass', code: 'accepted', message: 'The requested relationship and scene controls pass.', checks: [...baseChecks.slice(0, 3), acceptedAppearance], verifier_version: 'counterpart-verifier/2.1.0' } };
-  const rechecked: any = { ...structuredClone(original), id: newId, revision: 2, epoch: 0, state: 'ready', recovery_required: false, baseline: { ...baseline, id: 'rechecked-baseline' }, counterpart: acceptedCandidate, latest_capture: acceptedCandidate, recipe_snapshot: { recipe_version: '2.1.0', protected_objects: [] } };
+  const acceptedCandidate = { ...candidate, id: 'rechecked-counterpart', status: 'accepted', result: { ...candidate.result, accepted: true, outcome: 'pass', code: 'accepted', message: 'The requested relationship and scene controls pass.', checks: [...baseChecks.slice(0, 3), acceptedAppearance], verifier_version: 'counterpart-verifier/2.2.0' } };
+  const rechecked: any = { ...structuredClone(original), id: newId, revision: 2, epoch: 0, state: 'ready', recovery_required: false, baseline: { ...baseline, id: 'rechecked-baseline' }, counterpart: acceptedCandidate, latest_capture: acceptedCandidate, recipe_snapshot: { recipe_version: '2.2.0', protected_objects: [] } };
   const rechecks: Array<Record<string, unknown>> = [];
   const writes: string[] = [];
   const assets: string[] = [];
@@ -194,6 +194,7 @@ test('blocked orientation storage retains the original connection and safely ret
 });
 
 for (const [label, options] of [
+  ['current verification already applied', { sourceVersion: '2.2.0' }],
   ['known cup movement', { cupFailed: true }],
   ['uncertain camera registration', { registrationUnknown: true }],
   ['a frozen campaign contract', { campaign: true }],
@@ -208,7 +209,19 @@ for (const [label, options] of [
     await expect.poll(() => service.reads.filter(path => path === `/api/sessions/${oldId}`).length).toBeGreaterThan(1);
     expect(service.rechecks).toHaveLength(0);
     await expect(page.getByRole('button', { name: 'Save the complete pair', exact: true })).toHaveCount(0);
-    expect(service.original.recipe_snapshot.recipe_version).toBe('2.0.0');
+    expect(service.original.recipe_snapshot.recipe_version).toBe('sourceVersion' in options ? options.sourceVersion : '2.0.0');
     expect(await page.evaluate(() => (window as any).__cameraRequests)).toBe(0);
   });
 }
+
+
+test('saved 2.1 photos recheck to the new verifier without retaking or losing their original decision', async ({ page }) => {
+  const service = await savedPair(page, { sourceVersion: '2.1.0' });
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Save the complete pair', exact: true })).toBeEnabled();
+  expect(service.rechecks).toHaveLength(1);
+  expect(service.original.recipe_snapshot.recipe_version).toBe('2.1.0');
+  expect(service.original.latest_capture.result.accepted).toBe(false);
+  expect(service.rechecked.recipe_snapshot.recipe_version).toBe('2.2.0');
+  expect(await page.evaluate(() => (window as any).__cameraRequests)).toBe(0);
+});

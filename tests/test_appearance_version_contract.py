@@ -49,10 +49,11 @@ def install_visual(monkeypatch, checks):
 
 @pytest.mark.parametrize("recipe", ["spatial", "temporal"])
 @pytest.mark.parametrize("slot", ["baseline", "counterpart", "recovery", "preview"])
+@pytest.mark.parametrize("version", ["2.1.0", "2.2.0"])
 def test_appearance_unknown_blocks_every_capture_slot_and_original_measurement_is_preserved(
-    monkeypatch, recipe, slot
+    monkeypatch, recipe, slot, version
 ):
-    snapshot = build_recipe_snapshot(recipe, recipe_version="2.1.0")
+    snapshot = build_recipe_snapshot(recipe, recipe_version=version)
     first = frames(recipe)
     install_visual(monkeypatch, [])
     baseline = {
@@ -74,7 +75,7 @@ def test_appearance_unknown_blocks_every_capture_slot_and_original_measurement_i
         media_reader=lambda _: b"",
     )
     assert not result["accepted"] and result["outcome"] == "unknown", result
-    assert result["verifier_version"] == "counterpart-verifier/2.1.0"
+    assert result["verifier_version"] == f"counterpart-verifier/{version}"
     assert "warnings" not in result
     assert original in result["checks"]
     assert result["evidence"]["can_complete_pair"] is False
@@ -96,14 +97,15 @@ def test_appearance_unknown_blocks_every_capture_slot_and_original_measurement_i
         ("appearance_continuity:bottle:0", "unrecognized_code", "unknown"),
     ],
 )
-def test_every_unknown_or_failed_control_blocks(monkeypatch, name, code, outcome):
+@pytest.mark.parametrize("version", ["2.1.0", "2.2.0"])
+def test_every_unknown_or_failed_control_blocks(monkeypatch, name, code, outcome, version):
     blocked = clause(name, outcome, code)
     install_visual(monkeypatch, [blocked])
     result = verify(
         "spatial",
         "baseline",
         frames(),
-        recipe_snapshot=build_recipe_snapshot("spatial", recipe_version="2.1.0"),
+        recipe_snapshot=build_recipe_snapshot("spatial", recipe_version=version),
         media_reader=lambda _: b"",
     )
     assert not result["accepted"] and result["outcome"] == outcome
@@ -113,9 +115,10 @@ def test_every_unknown_or_failed_control_blocks(monkeypatch, name, code, outcome
 
 
 @pytest.mark.parametrize("scenario", ["wrong_relation", "camera_moved", "ambiguous"])
-def test_unknown_appearance_does_not_hide_actual_geometry_or_detection(monkeypatch, scenario):
+@pytest.mark.parametrize("version", ["2.1.0", "2.2.0"])
+def test_unknown_appearance_does_not_hide_actual_geometry_or_detection(monkeypatch, scenario, version):
     install_visual(monkeypatch, [])
-    snapshot = build_recipe_snapshot("spatial", recipe_version="2.1.0")
+    snapshot = build_recipe_snapshot("spatial", recipe_version=version)
     first = frames()
     baseline = {
         **verify("spatial", "baseline", first, recipe_snapshot=snapshot, media_reader=lambda _: b""),
@@ -136,7 +139,7 @@ def test_unknown_appearance_does_not_hide_actual_geometry_or_detection(monkeypat
     assert "warnings" not in result
 
 
-@pytest.mark.parametrize("version", ["1.0.0", "2.0.0", "2.1.0"])
+@pytest.mark.parametrize("version", ["1.0.0", "2.0.0", "2.1.0", "2.2.0"])
 def test_appearance_pass_stays_pass_and_unknown_stays_blocking(monkeypatch, version):
     snapshot = build_recipe_snapshot("spatial", recipe_version=version)
     for outcome, code in (("pass", "appearance_consistent"), ("unknown", "appearance_uncertain")):
@@ -176,6 +179,18 @@ def test_appearance_pass_stays_pass_and_unknown_stays_blocking(monkeypatch, vers
             "fd8ea613b3cd35893ace21b6a835605b661b901ca11bc30cb58a95887d8eae06",
             "a250f13b37cfa8e3275fb4d52175e7be28b7ffa41c624edb31919eb02bf2510f",
         ),
+        (
+            "spatial",
+            "2.1.0",
+            "27c517138051782b2bcf3407ec14f105f2bac0b56e2f576d95ab04b90f1f8fb3",
+            "9cd6ed7d64a1e0eaa8e7f89ee71821236533eda4288caa9269ad6bf5413c06bc",
+        ),
+        (
+            "temporal",
+            "2.1.0",
+            "e608e2046531a93c21ecab73400bc910fe3d99848345f18b5711b596da42436e",
+            "de83af052638cc76e356067b61f164d0766d5563ab81f3153e265c4b8870647a",
+        ),
     ],
 )
 def test_prechange_contract_and_decision_goldens_are_exact(recipe, version, snapshot_digest, decision_digest):
@@ -187,12 +202,16 @@ def test_prechange_contract_and_decision_goldens_are_exact(recipe, version, snap
     assert hashlib.sha256(serialized).hexdigest() == decision_digest
 
 
-def test_new_comparison_is_frozen_explicit_and_cannot_be_rehashed_away():
-    snapshot = build_recipe_snapshot("spatial", recipe_version="2.1.0")
+@pytest.mark.parametrize(("recipe_version", "appearance_version"), [("2.1.0", "2.0.0"), ("2.2.0", "3.0.0")])
+def test_new_comparison_is_frozen_explicit_and_cannot_be_rehashed_away(recipe_version, appearance_version):
+    snapshot = build_recipe_snapshot("spatial", recipe_version=recipe_version)
     assert_runtime_compatible(snapshot)
     assert validate_recipe_snapshot(snapshot) == snapshot
-    assert snapshot["verifier"]["visual"]["version"] == "counterpart-visual/2.0.0"
-    assert snapshot["verifier"]["visual"]["appearance"]["version"] == "counterpart-appearance/2.0.0"
+    assert snapshot["verifier"]["visual"]["version"] == f"counterpart-visual/{appearance_version}"
+    assert (
+        snapshot["verifier"]["visual"]["appearance"]["version"]
+        == f"counterpart-appearance/{appearance_version}"
+    )
     assert "appearance_unknown_policy" not in snapshot["verifier"]
     assert all(clause["required"] is True for clause in snapshot["clauses"])
     changed = deepcopy(snapshot)
@@ -207,24 +226,25 @@ def test_new_comparison_is_frozen_explicit_and_cannot_be_rehashed_away():
     ).hexdigest()
     with pytest.raises(RecipeContractError):
         validate_recipe_snapshot(changed)
-    assert version_for_mode("live") == "2.1.0"
+    assert version_for_mode("live") == "2.2.0"
     assert version_for_mode("replay") == "1.0.0"
-    assert all(item["recipe_version"] == "2.1.0" for item in recipe_catalogue())
+    assert all(item["recipe_version"] == "2.2.0" for item in recipe_catalogue())
 
 
-def test_missing_original_images_still_blocks_without_review_bypass():
+@pytest.mark.parametrize("version", ["2.1.0", "2.2.0"])
+def test_missing_original_images_still_blocks_without_review_bypass(version):
     result = verify(
         "spatial",
         "baseline",
         frames(),
-        recipe_snapshot=build_recipe_snapshot("spatial", recipe_version="2.1.0"),
+        recipe_snapshot=build_recipe_snapshot("spatial", recipe_version=version),
     )
     assert not result["accepted"] and result["outcome"] == "unknown"
     assert result["code"] == "visual_evidence_unavailable"
     assert "warnings" not in result
 
 
-@pytest.mark.parametrize("version", ["1.0.0", "2.0.0", "2.1.0"])
+@pytest.mark.parametrize("version", ["1.0.0", "2.0.0", "2.1.0", "2.2.0"])
 def test_signed_zero_matches_jsonb_only_in_new_decisions_without_mutating_inputs(monkeypatch, version):
     original = clause()
     original["measurements"] = {
@@ -246,7 +266,7 @@ def test_signed_zero_matches_jsonb_only_in_new_decisions_without_mutating_inputs
         recipe_snapshot=build_recipe_snapshot("spatial", recipe_version=version),
         media_reader=lambda _: b"",
     )
-    expected_sign = 1.0 if version == "2.1.0" else -1.0
+    expected_sign = 1.0 if version in ("2.1.0", "2.2.0") else -1.0
     assert math.copysign(1.0, result["evidence"]["observations"][0]["t_ms"]) == expected_sign
     assert math.copysign(1.0, observed[0]["t_ms"]) == -1.0
     assert json.dumps(original) == before
@@ -263,15 +283,143 @@ def test_signed_zero_matches_jsonb_only_in_new_decisions_without_mutating_inputs
     assert measured["text"] == original["measurements"]["text"]
 
 
-def test_advisory_fields_cannot_waive_an_unknown_appearance(monkeypatch):
+@pytest.mark.parametrize("version", ["2.1.0", "2.2.0"])
+def test_advisory_fields_cannot_waive_an_unknown_appearance(monkeypatch, version):
     original = {**clause(), "required": False, "severity": "warning"}
     install_visual(monkeypatch, [original])
     result = verify(
         "spatial",
         "baseline",
         frames(),
-        recipe_snapshot=build_recipe_snapshot("spatial", recipe_version="2.1.0"),
+        recipe_snapshot=build_recipe_snapshot("spatial", recipe_version=version),
         media_reader=lambda _: b"",
     )
     assert not result["accepted"] and result["outcome"] == "unknown"
     assert result["code"] == "appearance_uncertain"
+
+
+@pytest.mark.parametrize(
+    ("protected", "baseline_digest", "counterpart_digest"),
+    [
+        (
+            False,
+            "ffc9a897f528e182cd16686078f431d648d53956ac02e37de70b53cad583c6cb",
+            "253ee87b09560d3aa354e58a2f31abccbf90a2198aeb479981e138aaa45d0073",
+        ),
+        (
+            True,
+            "bfbab1ea2556aeb945a46f52c3ef3565e187e712bcd1e07c109668e76d51b415",
+            "a96fcf39f44cf52061e2b3789ad2c0b45bd4f4b2d3198435361728db6512c676",
+        ),
+    ],
+)
+def test_published_21_original_pixel_comparisons_are_byte_identical(
+    protected, baseline_digest, counterpart_digest
+):
+    from test_visual_v2 import image_frame
+
+    assets = {}
+    snapshot = build_recipe_snapshot(
+        "spatial", recipe_version="2.1.0", protected_objects=["book"] if protected else []
+    )
+    first = image_frame(assets, protected=protected)
+    second = image_frame(assets, right=True, protected=protected)
+    baseline = verify(
+        "spatial", "baseline", [first], recipe_snapshot=snapshot, media_reader=assets.__getitem__
+    )
+    counterpart = verify(
+        "spatial",
+        "counterpart",
+        [second],
+        {**baseline, "frames": [first]},
+        recipe_snapshot=snapshot,
+        media_reader=assets.__getitem__,
+    )
+    for result, digest in ((baseline, baseline_digest), (counterpart, counterpart_digest)):
+        assert result["accepted"]
+        assert (
+            hashlib.sha256(json.dumps(result, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            == digest
+        )
+
+
+@pytest.mark.parametrize("corrected_outcome", ["pass", "unknown", "fail"])
+def test_only_a_passing_compositing_comparison_can_supersede_raw_color_disagreement(
+    monkeypatch, corrected_outcome
+):
+    from test_visual_v2 import image_frame
+
+    from counterpart import appearance
+
+    def raw_comparison(reference, current, label, index):
+        return clause(f"appearance_continuity:{label}:{index}", "fail", "appearance_changed")
+
+    def corrected_comparison(reference, current, label, index, transform, **kwargs):
+        return clause(f"appearance_continuity:{label}:{index}", corrected_outcome, "appearance_uncertain")
+
+    monkeypatch.setattr(visual_checks, "_appearance", raw_comparison)
+    monkeypatch.setattr(appearance, "compare_appearance", corrected_comparison)
+    assets = {}
+    first = image_frame(assets)
+    second = image_frame(assets, right=True)
+    for version in ("counterpart-visual/2.0.0", "counterpart-visual/3.0.0"):
+        result = visual_checks.evaluate_visual_controls(
+            [second],
+            [first],
+            media_reader=assets.__getitem__,
+            version=version,
+        )
+        expected = "pass" if version.endswith("3.0.0") and corrected_outcome == "pass" else "fail"
+        assert result["outcome"] == expected
+        measured = [c for c in result["checks"] if c["name"].startswith("appearance_continuity:")]
+        assert all(c["outcome"] == expected for c in measured)
+        if version.endswith("3.0.0") and corrected_outcome != "pass":
+            assert all(
+                c["measurements"]["corrected_comparison"]["outcome"] == corrected_outcome for c in measured
+            )
+
+
+def test_changed_v3_runtime_thresholds_cannot_reinterpret_any_frozen_contract(monkeypatch):
+    from counterpart import appearance
+
+    historical = build_recipe_snapshot("spatial", recipe_version="2.1.0")
+    latest = build_recipe_snapshot("spatial", recipe_version="2.2.0")
+    changed = {**appearance.APPEARANCE_V3_THRESHOLDS, "maximum_compositing_residual": 1.0}
+    monkeypatch.setattr(appearance, "APPEARANCE_V3_THRESHOLDS", changed)
+    assert build_recipe_snapshot("spatial", recipe_version="2.2.0") == latest
+    assert validate_recipe_snapshot(latest) == latest
+    assert_runtime_compatible(historical)
+    with pytest.raises(RecipeContractError, match="appearance policy"):
+        assert_runtime_compatible(latest)
+
+
+@pytest.mark.parametrize("opacity", [0.15, 0.20, 0.25])
+def test_complete_verifier_accepts_background_explained_transparent_change_without_waiving_checks(opacity):
+    from test_appearance_comparison import transparent_pair
+
+    assets, first, second = transparent_pair(dark_background=True, opacity=opacity)
+    results = {}
+    for version in ("2.1.0", "2.2.0"):
+        snapshot = build_recipe_snapshot("spatial", recipe_version=version)
+        baseline = verify(
+            "spatial", "baseline", [first], recipe_snapshot=snapshot, media_reader=assets.__getitem__
+        )
+        assert baseline["accepted"]
+        results[version] = verify(
+            "spatial",
+            "counterpart",
+            [second],
+            {**baseline, "frames": [first]},
+            recipe_snapshot=snapshot,
+            media_reader=assets.__getitem__,
+        )
+    assert results["2.1.0"]["outcome"] == "fail"
+    assert results["2.1.0"]["code"] == "appearance_changed"
+    corrected = results["2.2.0"]
+    assert corrected["accepted"] and corrected["outcome"] == "pass"
+    assert all(check["outcome"] == "pass" and check.get("required", True) for check in corrected["checks"])
+    moving = next(check for check in corrected["checks"] if check["name"] == "appearance_continuity:bottle:0")
+    assert moving["measurements"]["method"] == "exposed_background_compositing"
+    assert moving["measurements"]["maximum_compositing_residual"] < 0.06
+    assert corrected["evidence"]["visual"]["appearance"]["version"] == "counterpart-appearance/3.0.0"
+    assert "warnings" not in corrected and "human_review_required" not in corrected

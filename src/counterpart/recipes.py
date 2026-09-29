@@ -23,8 +23,8 @@ ObjectClass = Literal["bottle", "cup", "book", "cell phone", "mouse"]
 SUPPORTED_OBJECTS: tuple[ObjectClass, ...] = ("bottle", "cup", "book", "cell phone", "mouse")
 SNAPSHOT_SCHEMA_VERSION = "counterpart.recipe/1"
 CURRENT_RECIPE_VERSION = "1.0.0"
-LIVE_RECIPE_VERSION = "2.1.0"
-VISUAL_RECIPE_VERSIONS = ("2.0.0", LIVE_RECIPE_VERSION)
+LIVE_RECIPE_VERSION = "2.2.0"
+VISUAL_RECIPE_VERSIONS = ("2.0.0", "2.1.0", LIVE_RECIPE_VERSION)
 
 
 class RecipeParameters(BaseModel):
@@ -166,6 +166,18 @@ _V21_APPEARANCE_THRESHOLDS = (
     ("minimum_stationary_texture", 0.02),
     ("maximum_flat_pixel_difference", 0.025),
     ("maximum_alternate_object_overlap", 0.05),
+)
+_V22_APPEARANCE_METHOD = (
+    "registered exposed-background compositing residual by height band; "
+    "stationary object-coordinate photometric agreement"
+)
+_V22_APPEARANCE_THRESHOLDS = tuple(
+    (key, value) for key, value in _V21_APPEARANCE_THRESHOLDS if key != "maximum_foreground_color_difference"
+) + (
+    ("compositing_bands", 5),
+    ("minimum_compositing_band_pixels", 8),
+    ("minimum_compositing_background_delta", 0.02),
+    ("maximum_compositing_residual", 0.06),
 )
 
 
@@ -364,7 +376,7 @@ def build_recipe_snapshot(
                 ],
             ]
         )
-        if recipe_version == "2.1.0":
+        if recipe_version in ("2.1.0", "2.2.0"):
             snapshot["verifier"]["visual"]["version"] = "counterpart-visual/2.0.0"
             snapshot["verifier"]["visual"]["appearance"] = {
                 "version": "counterpart-appearance/2.0.0",
@@ -376,6 +388,23 @@ def build_recipe_snapshot(
                 "illumination-corrected color; stationary appearance compares aligned pixels. "
                 "These measurements do not establish physical identity or unchanged texture. "
                 "Clear raw-pixel appearance changes still fail. Every unknown control blocks acceptance."
+            )
+        if recipe_version == "2.2.0":
+            snapshot["verifier"]["visual"]["version"] = "counterpart-visual/3.0.0"
+            snapshot["verifier"]["visual"]["appearance"] = {
+                "version": "counterpart-appearance/3.0.0",
+                "method": _V22_APPEARANCE_METHOD,
+                "thresholds": dict(_V22_APPEARANCE_THRESHOLDS),
+            }
+            snapshot["limitations"][-1] = (
+                "Moving-object appearance compares registered exposed-background silhouettes and "
+                "color changes explained by bounded scalar fits within five height bands. "
+                "Fit coefficients measure cross-view color consistency, not calibrated opacity or "
+                "per-pixel matting. Band summaries cannot distinguish visually equivalent replacements "
+                "or establish physical identity or unchanged texture. Stationary appearance compares "
+                "object coordinates within the unchanged geometric limits. A passing corrected comparison "
+                "supersedes raw color disagreement from transmitted backgrounds; otherwise substantial "
+                "raw appearance changes still fail. Every unknown control blocks acceptance."
             )
     payload = {key: value for key, value in snapshot.items() if key != "snapshot_sha256"}
     snapshot["snapshot_sha256"] = hashlib.sha256(_canonical(payload).encode("ascii")).hexdigest()
@@ -418,20 +447,28 @@ def assert_runtime_compatible(value: Any) -> None:
         raise RecipeContractError("The running verifier cannot execute this recipe version unchanged.")
     if snapshot["recipe_version"] in VISUAL_RECIPE_VERSIONS:
         from .visual_checks import (
+            COMPOSITED_APPEARANCE_VISUAL_VERSION,
             REGISTERED_APPEARANCE_VISUAL_VERSION,
             VISUAL_THRESHOLDS,
             VISUAL_VERSION,
         )
 
-        visual_version = (
-            VISUAL_VERSION if snapshot["recipe_version"] == "2.0.0" else REGISTERED_APPEARANCE_VISUAL_VERSION
-        )
+        visual_version = {
+            "2.0.0": VISUAL_VERSION,
+            "2.1.0": REGISTERED_APPEARANCE_VISUAL_VERSION,
+            "2.2.0": COMPOSITED_APPEARANCE_VISUAL_VERSION,
+        }[snapshot["recipe_version"]]
         if verifier["visual"]["version"] != visual_version or _canonical(
             verifier["visual"]["thresholds"]
         ) != _canonical(dict(VISUAL_THRESHOLDS)):
             raise RecipeContractError("The running verifier cannot execute this visual policy unchanged.")
-        if snapshot["recipe_version"] == "2.1.0":
-            from .appearance import APPEARANCE_METHOD, APPEARANCE_THRESHOLDS, APPEARANCE_VERSION
+        if snapshot["recipe_version"] in ("2.1.0", "2.2.0"):
+            if snapshot["recipe_version"] == "2.1.0":
+                from .appearance import APPEARANCE_METHOD, APPEARANCE_THRESHOLDS, APPEARANCE_VERSION
+            else:
+                from .appearance import APPEARANCE_V3_METHOD as APPEARANCE_METHOD
+                from .appearance import APPEARANCE_V3_THRESHOLDS as APPEARANCE_THRESHOLDS
+                from .appearance import APPEARANCE_V3_VERSION as APPEARANCE_VERSION
 
             appearance = verifier["visual"]["appearance"]
             if (

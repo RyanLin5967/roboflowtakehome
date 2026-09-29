@@ -11,7 +11,12 @@ import pytest
 from PIL import Image, ImageDraw
 from test_visual_v2 import image_frame
 
-from counterpart.appearance import APPEARANCE_THRESHOLDS, compare_appearance
+from counterpart.appearance import (
+    APPEARANCE_THRESHOLDS,
+    APPEARANCE_V3_VERSION,
+    APPEARANCE_VERSION,
+    compare_appearance,
+)
 from counterpart.storage import inspect_image
 from counterpart.visual_checks import _appearance, _load, _registration
 
@@ -27,12 +32,12 @@ def changed(assets, frame, edit):
     return {**deepcopy(frame), **metadata}
 
 
-def compare(assets, a, b, label="bottle", transform=None):
+def compare(assets, a, b, label="bottle", transform=None, *, version=APPEARANCE_VERSION):
     old, new = _load(a, assets.__getitem__), _load(b, assets.__getitem__)
     if transform is None:
         registration, transform = _registration(old, new, 0)
         assert registration["outcome"] == "pass", registration
-    return compare_appearance(old, new, label, 0, transform)
+    return compare_appearance(old, new, label, 0, transform, version=version)
 
 
 def paint_box(image, color, *, label="bottle", inner=False):
@@ -146,11 +151,13 @@ def test_threshold_contract_is_immutable():
         APPEARANCE_THRESHOLDS["maximum_row_profile_difference"] = 1
 
 
-def transparent_pair(seed=3):
+def transparent_pair(seed=3, *, dark_background=False, opacity=0.4):
     """Known image construction: same translucent silhouette over two backgrounds."""
     rng = np.random.default_rng(seed)
     base = Image.new("RGB", (640, 480), (215, 218, 221))
     draw = ImageDraw.Draw(base)
+    if dark_background:
+        draw.rectangle((420, 0, 639, 479), fill=(25, 35, 45))
     for _ in range(800):
         x, y = rng.integers(0, 630), rng.integers(0, 470)
         color = tuple(int(v) for v in rng.integers(50, 230, size=3))
@@ -176,7 +183,7 @@ def transparent_pair(seed=3):
         )
         a = np.asarray(base).astype(float)
         mask = np.asarray(silhouette).astype(float)[..., None] / 255
-        composite = a * (1 - 0.4 * mask) + np.array([90, 105, 100]) * 0.4 * mask
+        composite = a * (1 - opacity * mask) + np.array([90, 105, 100]) * opacity * mask
         image = Image.fromarray(composite.astype(np.uint8))
         ImageDraw.Draw(image).rectangle((left + 22, 120, left + 58, 143), fill=(30, 105, 65))
         out = BytesIO()
@@ -251,3 +258,102 @@ def test_detections_without_observed_foreground_difference_cannot_supply_evidenc
     result = compare(assets, first, second)
     assert not result["passed"]
     assert "blends into the background" in result["detail"]
+
+
+@pytest.mark.parametrize("seed", [3, 8, 23])
+def test_v3_transparent_shape_moving_across_light_and_dark_backgrounds(seed):
+    assets, first, second = transparent_pair(seed, dark_background=True)
+    legacy = compare(assets, first, second)
+    assert not legacy["passed"]
+    result = compare(assets, first, second, version=APPEARANCE_V3_VERSION)
+    assert result["passed"], result
+    assert result["measurements"]["method"] == "exposed_background_compositing"
+    assert result["measurements"]["foreground_color_difference"] > 0.12
+    assert result["measurements"]["maximum_compositing_residual"] < 0.06
+    assert all(0 <= coefficient <= 1 for coefficient in result["measurements"]["band_fit_coefficients"])
+
+
+@pytest.mark.parametrize("color", [(230, 30, 30), (30, 30, 230)])
+def test_v3_localized_cap_recolor_is_not_averaged_out(color):
+    assets, first, second = transparent_pair(dark_background=True)
+
+    def edit(image):
+        image = image.copy()
+        ImageDraw.Draw(image).rectangle((492, 120, 528, 143), fill=color)
+        return image
+
+    second = changed(assets, second, edit)
+    result = compare(assets, first, second, version=APPEARANCE_V3_VERSION)
+    assert not result["passed"], result
+    assert result["measurements"]["maximum_compositing_residual"] > 0.06
+    assert "could not confirm" in result["detail"]
+
+
+def test_v3_stationary_object_coordinates_respect_allowed_small_position_change():
+    assets, first, second = transparent_pair()
+
+    def edit(image):
+        image = image.copy()
+        crop = image.crop((282, 180, 347, 331))
+        image.paste(crop, (282, 184))
+        return image
+
+    second = changed(assets, second, edit)
+    second["detections"][1]["box"] = [282 / 640, 184 / 480, 346 / 640, 334 / 480]
+    legacy = compare(assets, first, second, "cup")
+    assert not legacy["passed"]
+    result = compare(assets, first, second, "cup", version=APPEARANCE_V3_VERSION)
+    assert result["passed"], result
+    assert result["measurements"]["method"] == "stationary_object_coordinates"
+    assert result["measurements"]["registered_center_delta"] < 0.01
+
+
+@pytest.mark.parametrize("color", [(64, 128, 64), (128, 128, 128), (30, 30, 230), (230, 30, 30)])
+def test_v3_compositing_does_not_explain_arbitrary_object_recoloring(color):
+    assets = {}
+    first, second = image_frame(assets), image_frame(assets, right=True)
+    second = changed(assets, second, lambda image: paint_box(image, color))
+    result = compare(assets, first, second, version=APPEARANCE_V3_VERSION)
+    assert not result["passed"], result
+
+
+def test_v3_does_not_change_legacy_result_on_same_pixels():
+    assets, first, second = transparent_pair(dark_background=True)
+    before = compare(assets, first, second)
+    assert compare(assets, first, second, version=APPEARANCE_V3_VERSION)["passed"]
+    after = compare(assets, first, second)
+    assert after == before
+    assert not after["passed"]
+
+
+@pytest.mark.parametrize("opacity", [0.15, 0.2, 0.25])
+def test_v3_checks_background_explanation_even_when_raw_color_claimed_strong_failure(opacity):
+    # Explicit alpha-compositing fixture: identical material and shape move
+    # from a bright to a dark background. Raw RGB appearances should differ.
+    assets, first, second = transparent_pair(dark_background=True, opacity=opacity)
+    old, new = _load(first, assets.__getitem__), _load(second, assets.__getitem__)
+    legacy = _appearance(old, new, "bottle", 0)
+    assert legacy["outcome"] == "fail"
+    assert legacy["measurements"]["patch_difference"] > 0.35
+    result = compare(assets, first, second, version=APPEARANCE_V3_VERSION)
+    assert result["passed"], result
+    assert result["measurements"]["maximum_compositing_residual"] < 0.01
+
+
+@pytest.mark.parametrize("control", ["erased", "inverted", "shuffled"])
+def test_v3_stationary_alignment_does_not_excuse_destroyed_texture(control):
+    assets, first, second = transparent_pair()
+
+    def edit(image):
+        data = np.array(image)
+        patch = data[180:331, 282:347]
+        if control == "erased":
+            patch[:] = patch.mean(axis=(0, 1)).astype(np.uint8)
+        elif control == "inverted":
+            patch[:] = 255 - patch
+        else:
+            patch[:] = np.random.default_rng(10).permutation(patch.reshape(-1, 3)).reshape(patch.shape)
+        return Image.fromarray(data)
+
+    second = changed(assets, second, edit)
+    assert not compare(assets, first, second, "cup", version=APPEARANCE_V3_VERSION)["passed"]

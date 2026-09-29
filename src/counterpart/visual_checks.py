@@ -21,6 +21,7 @@ from PIL import Image
 
 VISUAL_VERSION = "counterpart-visual/1.0.0"
 REGISTERED_APPEARANCE_VISUAL_VERSION = "counterpart-visual/2.0.0"
+COMPOSITED_APPEARANCE_VISUAL_VERSION = "counterpart-visual/3.0.0"
 # An immutable contract is copied into recipe v2. A change needs a new version.
 VISUAL_THRESHOLDS = MappingProxyType(
     {
@@ -408,7 +409,11 @@ def evaluate_visual_controls(
     must itself have sufficient distributed background texture. No image gets
     accepted by trusting a supplied registration or a client-generated hash.
     """
-    if version not in (VISUAL_VERSION, REGISTERED_APPEARANCE_VISUAL_VERSION):
+    if version not in (
+        VISUAL_VERSION,
+        REGISTERED_APPEARANCE_VISUAL_VERSION,
+        COMPOSITED_APPEARANCE_VISUAL_VERSION,
+    ):
         raise InvalidVisualEvidence("Unknown visual verification version.")
     if not isinstance(frames, list) or not 1 <= len(frames) <= 48:
         raise InvalidVisualEvidence("Visual checks require one to 48 original images.")
@@ -433,9 +438,29 @@ def evaluate_visual_controls(
         registration, transform = _registration(reference, current, index)
         checks.append(registration)
         for label in (object_a, object_b, *protected_objects):
-            if version == REGISTERED_APPEARANCE_VISUAL_VERSION:
+            if version in (REGISTERED_APPEARANCE_VISUAL_VERSION, COMPOSITED_APPEARANCE_VISUAL_VERSION):
                 from .appearance import APPEARANCE_VERSION, compare_appearance
 
+                appearance_version = APPEARANCE_VERSION
+                corrected_comparison = None
+                if version == COMPOSITED_APPEARANCE_VISUAL_VERSION:
+                    from .appearance import APPEARANCE_V3_VERSION
+
+                    appearance_version = APPEARANCE_V3_VERSION
+                    corrected_comparison = compare_appearance(
+                        reference,
+                        current,
+                        label,
+                        index,
+                        transform,
+                        version=appearance_version,
+                    )
+                    if corrected_comparison["outcome"] == "pass":
+                        # Transparent objects inherit the exposed background's
+                        # colors. A measured compositing match supersedes raw
+                        # color disagreement; unknown never receives this path.
+                        checks.append(corrected_comparison)
+                        continue
                 strong_change = _appearance(reference, current, label, index)
                 if strong_change["outcome"] == "fail":
                     strong_change["detail"] = (
@@ -443,12 +468,16 @@ def evaluate_visual_controls(
                         "then retake the second photo."
                     )
                     strong_change["measurements"].update(
-                        appearance_version=APPEARANCE_VERSION,
+                        appearance_version=appearance_version,
                         method="strong_pixel_difference_guard",
                     )
+                    if corrected_comparison is not None:
+                        strong_change["measurements"]["corrected_comparison"] = corrected_comparison
                     checks.append(strong_change)
-                else:
+                elif version == REGISTERED_APPEARANCE_VISUAL_VERSION:
                     checks.append(compare_appearance(reference, current, label, index, transform))
+                else:
+                    checks.append(corrected_comparison)
             else:
                 checks.append(_appearance(reference, current, label, index))
         for label in protected_objects:
@@ -466,8 +495,13 @@ def evaluate_visual_controls(
             "limitations": list(VISUAL_LIMITATIONS),
         },
     }
-    if version == REGISTERED_APPEARANCE_VISUAL_VERSION:
-        from .appearance import APPEARANCE_METHOD, APPEARANCE_THRESHOLDS, APPEARANCE_VERSION
+    if version in (REGISTERED_APPEARANCE_VISUAL_VERSION, COMPOSITED_APPEARANCE_VISUAL_VERSION):
+        if version == REGISTERED_APPEARANCE_VISUAL_VERSION:
+            from .appearance import APPEARANCE_METHOD, APPEARANCE_THRESHOLDS, APPEARANCE_VERSION
+        else:
+            from .appearance import APPEARANCE_V3_METHOD as APPEARANCE_METHOD
+            from .appearance import APPEARANCE_V3_THRESHOLDS as APPEARANCE_THRESHOLDS
+            from .appearance import APPEARANCE_V3_VERSION as APPEARANCE_VERSION
 
         result["evidence"]["appearance"] = {
             "version": APPEARANCE_VERSION,

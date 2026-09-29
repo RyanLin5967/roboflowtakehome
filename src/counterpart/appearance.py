@@ -45,6 +45,26 @@ APPEARANCE_THRESHOLDS = MappingProxyType(
 )
 
 
+APPEARANCE_V3_VERSION = "counterpart-appearance/3.0.0"
+APPEARANCE_V3_METHOD = (
+    "registered exposed-background compositing residual by height band; "
+    "stationary object-coordinate photometric agreement"
+)
+APPEARANCE_V3_THRESHOLDS = MappingProxyType(
+    {
+        **{
+            key: value
+            for key, value in APPEARANCE_THRESHOLDS.items()
+            if key != "maximum_foreground_color_difference"
+        },
+        "compositing_bands": 5,
+        "minimum_compositing_band_pixels": 8,
+        "minimum_compositing_background_delta": 0.02,
+        "maximum_compositing_residual": 0.06,
+    }
+)
+
+
 def _rounded(value):
     if isinstance(value, float):
         return round(value, 7)
@@ -73,12 +93,23 @@ def _iou(a, b):
     return intersection / max(1e-12, float(np.prod(a[2:] - a[:2]) + np.prod(b[2:] - b[:2])) - intersection)
 
 
-def compare_appearance(reference: dict, current: dict, label: str, index: int, transform) -> dict:
+def compare_appearance(
+    reference: dict,
+    current: dict,
+    label: str,
+    index: int,
+    transform,
+    *,
+    version: str = APPEARANCE_VERSION,
+) -> dict:
     """Return one required pass/fail/unknown clause from immutable decoded pixels."""
-    p = APPEARANCE_THRESHOLDS
+    if version not in (APPEARANCE_VERSION, APPEARANCE_V3_VERSION):
+        raise ValueError("Unknown appearance comparison version.")
+    compositing = version == APPEARANCE_V3_VERSION
+    p = APPEARANCE_V3_THRESHOLDS if compositing else APPEARANCE_THRESHOLDS
     facts = {
         "label": label,
-        "appearance_version": APPEARANCE_VERSION,
+        "appearance_version": version,
         "reference_sha256": reference["sha256"],
         "candidate_sha256": current["sha256"],
     }
@@ -159,6 +190,14 @@ def compare_appearance(reference: dict, current: dict, label: str, index: int, t
         x1, y1, x2, y2 = boxes[0]
         dx, dy = max(1, (x2 - x1) // 10), max(1, (y2 - y1) // 10)
         a, b = old[y1 + dy : y2 - dy, x1 + dx : x2 - dx], new[y1 + dy : y2 - dy, x1 + dx : x2 - dx]
+        if compositing:
+            # Geometry is checked independently. Compare corresponding object
+            # coordinates so permitted detector jitter/small movement is not
+            # mistaken for an appearance change. No pixel-driven free warp.
+            bx1, by1, bx2, by2 = boxes[1]
+            bdx, bdy = max(1, (bx2 - bx1) // 10), max(1, (by2 - by1) // 10)
+            b = new[by1 + bdy : by2 - bdy, bx1 + bdx : bx2 - bdx]
+            facts["method"] = "stationary_object_coordinates"
         a, b = (
             cv2.resize(a, (32, 32), interpolation=cv2.INTER_AREA),
             cv2.resize(b, (32, 32), interpolation=cv2.INTER_AREA),
@@ -192,8 +231,13 @@ def compare_appearance(reference: dict, current: dict, label: str, index: int, t
             "pass" if passed else "unknown",
             f"The {label}'s registered appearance is consistent after background lighting correction."
             if passed
-            else f"The {label}'s appearance changed; restore it and its lighting, "
-            "then retake the second photo.",
+            else (
+                f"The comparison could not confirm the {label}'s appearance. "
+                "Keep it unobstructed in steady lighting and retake the second photo."
+                if compositing
+                else f"The {label}'s appearance changed; restore it and its lighting, "
+                "then retake the second photo."
+            ),
         )
     if box_iou > p["maximum_moving_box_iou"]:
         return result(
@@ -235,6 +279,7 @@ def compare_appearance(reference: dict, current: dict, label: str, index: int, t
     kernel = np.ones((p["closing_kernel_pixels"], p["closing_kernel_pixels"]), dtype=np.uint8)
     changed = cv2.morphologyEx(changed, cv2.MORPH_CLOSE, kernel)
     silhouettes, colors, occupancies = [], [], []
+    band_foregrounds, band_backgrounds = [], []
     for index_, (x1, y1, x2, y2) in enumerate(boxes):
         mask = changed[y1:y2, x1:x2].astype(bool)
         occupancy = float(mask.mean())
@@ -245,6 +290,31 @@ def compare_appearance(reference: dict, current: dict, label: str, index: int, t
             )
         foreground = old if index_ == 0 else new
         colors.append(foreground[y1:y2, x1:x2][mask].mean(axis=0) / 255)
+        if compositing:
+            # The other registered frame supplies the background exposed when
+            # this object moved. A single fitted scalar per vertical band must
+            # explain all three color-channel changes; arbitrary recoloring
+            # cannot be independently fitted per channel.
+            background_image = new if index_ == 0 else old
+            fg = foreground[y1:y2, x1:x2].astype(np.float64) / 255
+            bg = background_image[y1:y2, x1:x2].astype(np.float64) / 255
+            foreground_means, background_means = [], []
+            height = mask.shape[0]
+            for band in range(p["compositing_bands"]):
+                section = slice(
+                    band * height // p["compositing_bands"], (band + 1) * height // p["compositing_bands"]
+                )
+                support = mask[section]
+                if int(support.sum()) < p["minimum_compositing_band_pixels"]:
+                    return result(
+                        "unknown",
+                        f"Part of the {label} is indistinguishable from its "
+                        "background; use clearer lighting and retake the pair.",
+                    )
+                foreground_means.append(fg[section][support].mean(axis=0))
+                background_means.append(bg[section][support].mean(axis=0))
+            band_foregrounds.append(foreground_means)
+            band_backgrounds.append(background_means)
         occupancies.append(occupancy)
         silhouettes.append(
             cv2.resize(
@@ -271,14 +341,46 @@ def compare_appearance(reference: dict, current: dict, label: str, index: int, t
     passed = (
         silhouette_iou >= p["minimum_silhouette_iou"]
         and profile <= p["maximum_row_profile_difference"]
-        and color_difference <= p["maximum_foreground_color_difference"]
+        and (compositing or color_difference <= p["maximum_foreground_color_difference"])
         and chromaticity <= p["maximum_chromaticity_difference"]
     )
+    if compositing:
+        delta_foreground = np.asarray(band_foregrounds[1]) - band_foregrounds[0]
+        delta_background = np.asarray(band_backgrounds[1]) - band_backgrounds[0]
+        squared = np.sum(delta_background**2, axis=1)
+        identifiable = squared >= p["minimum_compositing_background_delta"] ** 2
+        coefficients = np.zeros(p["compositing_bands"], dtype=float)
+        coefficients[identifiable] = np.clip(
+            np.sum(delta_foreground[identifiable] * delta_background[identifiable], axis=1)
+            / squared[identifiable],
+            0,
+            1,
+        )
+        residuals = delta_foreground - coefficients[:, None] * delta_background
+        maximum_residual = float(np.max(np.abs(residuals)))
+        facts.update(
+            method="exposed_background_compositing",
+            band_foreground_changes=delta_foreground.tolist(),
+            band_background_changes=delta_background.tolist(),
+            band_fit_coefficients=coefficients.tolist(),
+            band_unexplained_changes=residuals.tolist(),
+            maximum_compositing_residual=maximum_residual,
+        )
+        passed = (
+            silhouette_iou >= p["minimum_silhouette_iou"]
+            and profile <= p["maximum_row_profile_difference"]
+            and maximum_residual <= p["maximum_compositing_residual"]
+        )
     return result(
         "pass" if passed else "unknown",
         f"The {label}'s background-relative shape and color are consistent; "
         "this does not prove physical identity or unchanged texture."
         if passed
-        else f"The {label}'s shape or color differs; restore the same object and lighting, "
-        "then retake the second photo.",
+        else (
+            f"The comparison could not confirm the {label}'s appearance. "
+            "Keep the same object unobstructed in steady lighting and retake the second photo."
+            if compositing
+            else f"The {label}'s shape or color differs; restore the same object and lighting, "
+            "then retake the second photo."
+        ),
     )

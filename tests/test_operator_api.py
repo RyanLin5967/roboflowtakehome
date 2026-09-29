@@ -1045,7 +1045,7 @@ def test_new_live_campaign_freezes_protected_objects_and_visual_recipe(system, m
     assert response.status_code == 201, response.text
     created = response.json()
     snapshot = created["recipe_snapshot"]
-    assert snapshot["recipe_version"] == "2.1.0"
+    assert snapshot["recipe_version"] == "2.2.0"
     assert snapshot["protected_objects"] == ["book", "mouse"]
     joined = join(client, invitation(client, created)).json()["session"]
     assert joined["recipe_snapshot"] == snapshot

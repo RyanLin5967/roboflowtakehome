@@ -1,3 +1,64 @@
+# New-capture false rejections corrected with background compositing — 2026-09-29
+
+The previous claim of a repaired live flow was too broad: old saved pairs passed,
+but fresh 2.1 captures exposed two remaining bugs. The transparent bottle inherited
+a dark background, pushing raw mean color difference to .12484/.12929 above .12
+while geometry, silhouette and chromaticity passed. A cup shift within accepted
+geometry also misaligned fixed-coordinate patches (NCC .81895).
+
+Live recipe/verifier 2.2.0 now pins visual/appearance 3.0.0. Five vertical bands test
+whether measured foreground color changes are explained by exposed-background
+changes using bounded scalar fits; the unexplained residual must pass. This replaces
+the confounded raw foreground-mean gate instead of increasing its threshold.
+Stationary objects compare corresponding object-box coordinates within unchanged
+geometry limits. Corrected passes supersede raw-color disagreement; unresolved
+checks still block. Fitted coefficients measure consistency, not physical opacity,
+identity or complete texture invariance. Historical 1.0/2.0/2.1 results remain exact.
+
+Actual new failures be27aa3b, 132b7aa3 and b86342de now each pass all 19 checks using
+their original bytes and recorded Roboflow detections. The wrong-relation attempt
+1fa24eac and scale/lane violation c538159a remain blocked. Across old and new examples,
+14/14 object appearance checks in seven valid pairs pass. Ten manipulated-original
+controls remain blocked, including changed caps, recoloring, inversion, shuffling,
+replacement and partial texture erasure. These repeated-scene repair examples are
+not held-out accuracy. Generated transparent light-to-dark cases also exercise
+corrected acceptance when the old raw-color test strongly fails.
+
+Recheck supports frozen 2.0 and 2.1 sources, targeting a separate 2.2 session.
+Historical lost-response receipts recover the originally recorded child/version;
+new keys target 2.2. Original captures/contracts, split lineage and camera orientation
+remain preserved. No manual review or fresh camera/provider call is needed to recheck.
+
+Executed actual compiled UI/API/isolated PostgreSQL on copies of the newest physical
+pair: original 2.1 decisions reproduced exactly; automatic 2.2 recheck passed every
+clause, Save/download/reload and independent PortableRelease validation passed.
+No source mutation, new provider reservations, camera request, browser error or 390px
+overflow. Test schema/server were removed. Separate ignored evidence is under
+artifacts/qa/automatic-appearance-v22. This validates the latest saved pair; it does
+not establish that every future physical scene will pass.
+
+Executed full Python suite with explicit PostgreSQL DSN: 1,188 passed, no skips.
+Further focused checks include 40 comparator tests, 65 version-contract tests and
+25 recheck/API/archive tests, all passed. All 14 relevant browser recheck tests passed;
+actual compiled browser flow also passed after the TypeScript build correction.
+TypeScript/Vite, Ruff and diff checks passed. No local ML or Modal compute.
+
+A separate 16-call hosted CLIP diagnostic used an atomic 16-unit reservation after
+fresh free-plan verification. It corroborated the cup's appearance but exposed
+cross-scene overlap between valid/altered bottle similarities, so a global embedding
+cutoff was rejected. Ledger total after intervening user captures: 120/512 reserved
+units; estimated diagnostic use .003 Roboflow credits. No production CLIP gate.
+Ignored results remain in artifacts/qa/appearance-review/hosted-embedding-v2.
+Compositing equation background reference (not a claim to implement its learned model):
+https://openaccess.thecvf.com/content_CVPR_2020/papers/Sengupta_Background_Matting_The_World_Is_Your_Green_Screen_CVPR_2020_paper.pdf
+
+Running http://127.0.0.1:8080 with bundle index-BmTCzx_J.js and live recipes 2.2.0.
+API PID 38120 / exec session 46171; worker exec session 43890. Both restarted after
+confirming no active jobs, then health and served bundle were verified. Refresh the
+existing page to recheck the saved pair automatically. No remote push/public deployment.
+
+---
+
 # Automatic capture repaired with required appearance checks — 2026-09-29
 
 This entry supersedes the review-detour entry below. The forced standalone review
