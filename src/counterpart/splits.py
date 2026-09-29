@@ -54,6 +54,11 @@ def validate_split_group(snapshot: dict, session_id: str) -> dict:
     if snapshot["kind"] == "session":
         if identifier != session_id or snapshot["name"] is not None:
             raise ValueError("Independent split group must equal its session ID")
+    elif snapshot["kind"] == "derived_session":
+        # Re-verifying the same original media must retain its source partition.
+        # The append-only derivation receipt binds this ID to the source session.
+        if identifier == session_id or snapshot["name"] is not None:
+            raise ValueError("Derived split group must name its distinct original session")
     elif snapshot["kind"] == "operator_group":
         name = snapshot["name"]
         if not isinstance(name, str) or not name.strip() or name != name.strip() or len(name) > 120:

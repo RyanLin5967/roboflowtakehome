@@ -22,6 +22,19 @@ function saveOrientation(sessionId: string | undefined, mirrored: boolean): bool
   } catch { return false; }
 }
 
+/** Rechecked sessions retain the pixel coordinate system of their original evidence. */
+export function inheritCameraOrientation(sourceId: string, targetId: string): void {
+  const unavailable = 'Your saved photos are safe, but this browser could not preserve their camera orientation. Enable browser storage, then retry the saved-photo check.';
+  let source: string | null;
+  try { source = localStorage.getItem(orientationKey(sourceId)); }
+  catch { throw new Error(unavailable); }
+  // Historical sessions without metadata always used original pixels. Persist
+  // that explicitly so a later retake cannot default to a front-camera mirror.
+  const mirrored = source === 'mirrored';
+  if (readOrientation(targetId) === mirrored) return;
+  if (!saveOrientation(targetId, mirrored)) throw new Error(unavailable);
+}
+
 export function useCamera(onDiscontinuity: () => void, options: CameraOptions = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const stream = useRef<MediaStream | null>(null);

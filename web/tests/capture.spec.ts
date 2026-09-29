@@ -465,38 +465,3 @@ test('outstanding live preview accelerates only snapshot reads, then returns to 
   expect(previewPosts).toHaveLength(1);
   expect(maximumInFlight).toBe(1);
 });
-
-test('appearance-only uncertainty offers review of the saved pair without approving it', async ({ page }) => {
-  const service = await mockService(page);
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Open replay session' }).click();
-  await page.getByRole('button', { name: 'Capture the first image' }).click();
-  const first = structuredClone(service.session.baseline);
-  service.session.latest_capture = { ...first, id: 'appearance-second', slot: 'counterpart', status: 'rejected', result: { ...first.result, accepted: false, code: 'appearance_uncertain', outcome: 'unknown', message: 'Appearance is inconclusive.', checks: [{ name: 'reference_position', passed: true, outcome: 'pass' }, { name: 'background_registration:0', passed: true, outcome: 'pass' }, { name: 'appearance_continuity:bottle:0', passed: false, outcome: 'unknown' }] } };
-  await expect(page.getByRole('button', { name: 'Review these two photos' })).toBeVisible();
-  await expect(page.getByRole('article', { name: 'Photo 2 needs review' })).toBeVisible();
-  await expect(page.getByText('Both photos are saved. Appearance needs review.')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Take another second photo instead' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Save the complete pair' })).toHaveCount(0);
-  expect(service.session.baseline).toEqual(first);
-  expect(service.session.counterpart).toBeNull();
-  expect(service.session.pair).toBeNull();
-  await page.getByRole('button', { name: 'Review these two photos' }).click();
-  await expect(page).toHaveURL(new RegExp(`/workspace/evidence/${service.session.id}\\?baseline=${first.id}&counterpart=appearance-second`));
-});
-
-test('appearance advice does not hide failed geometry or unresolved camera checks', async ({ page }) => {
-  const service = await mockService(page);
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Open replay session' }).click();
-  await page.getByRole('button', { name: 'Capture the first image' }).click();
-  const first = service.session.baseline;
-  const checks: any[] = [{ name: 'appearance_continuity:bottle:0', passed: false, outcome: 'unknown' }, { name: 'reference_position', passed: false, outcome: 'fail' }];
-  service.session.latest_capture = { ...first, id: 'mixed-second', slot: 'counterpart', status: 'rejected', result: { ...first.result, accepted: false, code: 'reference_moved', outcome: 'fail', message: 'The cup moved.', checks } };
-  await expect(page.getByText('Keep the first. Fix this one.', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Review these two photos' })).toHaveCount(0);
-  checks[1] = { name: 'background_registration:0', passed: false, outcome: 'unknown', code: 'registration_uncertain' };
-  Object.assign(service.session.latest_capture.result, { code: 'registration_uncertain', outcome: 'unknown' });
-  await expect(page.getByText('Show more fixed background detail.', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Review these two photos' })).toHaveCount(0);
-});

@@ -20,6 +20,7 @@ import numpy as np
 from PIL import Image
 
 VISUAL_VERSION = "counterpart-visual/1.0.0"
+REGISTERED_APPEARANCE_VISUAL_VERSION = "counterpart-visual/2.0.0"
 # An immutable contract is copied into recipe v2. A change needs a new version.
 VISUAL_THRESHOLDS = MappingProxyType(
     {
@@ -399,6 +400,7 @@ def evaluate_visual_controls(
     object_b: str = "cup",
     protected_objects: Sequence[str] = (),
     media_reader: Callable[[str], bytes],
+    version: str = VISUAL_VERSION,
 ) -> dict:
     """Check every sampled frame against the original baseline's first image.
 
@@ -406,6 +408,8 @@ def evaluate_visual_controls(
     must itself have sufficient distributed background texture. No image gets
     accepted by trusting a supplied registration or a client-generated hash.
     """
+    if version not in (VISUAL_VERSION, REGISTERED_APPEARANCE_VISUAL_VERSION):
+        raise InvalidVisualEvidence("Unknown visual verification version.")
     if not isinstance(frames, list) or not 1 <= len(frames) <= 48:
         raise InvalidVisualEvidence("Visual checks require one to 48 original images.")
     if len(protected_objects) > 3 or len(set(protected_objects)) != len(protected_objects):
@@ -429,19 +433,45 @@ def evaluate_visual_controls(
         registration, transform = _registration(reference, current, index)
         checks.append(registration)
         for label in (object_a, object_b, *protected_objects):
-            checks.append(_appearance(reference, current, label, index))
+            if version == REGISTERED_APPEARANCE_VISUAL_VERSION:
+                from .appearance import APPEARANCE_VERSION, compare_appearance
+
+                strong_change = _appearance(reference, current, label, index)
+                if strong_change["outcome"] == "fail":
+                    strong_change["detail"] = (
+                        f"The {label}'s appearance changed substantially; restore it and its lighting, "
+                        "then retake the second photo."
+                    )
+                    strong_change["measurements"].update(
+                        appearance_version=APPEARANCE_VERSION,
+                        method="strong_pixel_difference_guard",
+                    )
+                    checks.append(strong_change)
+                else:
+                    checks.append(compare_appearance(reference, current, label, index, transform))
+            else:
+                checks.append(_appearance(reference, current, label, index))
         for label in protected_objects:
             checks.append(_protected(reference, current, label, index, transform))
     outcomes = {check["outcome"] for check in checks}
     outcome = "fail" if "fail" in outcomes else "unknown" if "unknown" in outcomes else "pass"
-    return {
+    result = {
         "outcome": outcome,
         "checks": checks,
         "evidence": {
-            "version": VISUAL_VERSION,
+            "version": version,
             "sources": sources,
             "registration_model": "ORB reciprocal ratio matches + RANSAC 2-D similarity",
             "thresholds": dict(VISUAL_THRESHOLDS),
             "limitations": list(VISUAL_LIMITATIONS),
         },
     }
+    if version == REGISTERED_APPEARANCE_VISUAL_VERSION:
+        from .appearance import APPEARANCE_METHOD, APPEARANCE_THRESHOLDS, APPEARANCE_VERSION
+
+        result["evidence"]["appearance"] = {
+            "version": APPEARANCE_VERSION,
+            "method": APPEARANCE_METHOD,
+            "thresholds": dict(APPEARANCE_THRESHOLDS),
+        }
+    return result

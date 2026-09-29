@@ -18,6 +18,7 @@ from psycopg.conninfo import make_conninfo
 from counterpart.config import Settings
 from counterpart.evidence_revisions import BASELINE_CRITERIA, EvidenceRepository, capture_digest
 from counterpart.providers import RoboflowDetector
+from counterpart.recipes import build_recipe_snapshot
 from counterpart.repository import Conflict, Repository
 from counterpart.storage import MediaStore
 from counterpart.worker import Worker
@@ -107,7 +108,17 @@ def submit(repo, session, source, slot):
 
 def authorized(system):
     repo, evidence, worker, frame = system
-    session = repo.create_session("spatial", "live", "bottle", "cup")["session"]
+    # These tests exercise preservation of the historical reviewed-baseline
+    # workflow. New 2.1 collection requires every automatic clause to pass.
+    with repo._connection() as connection:
+        session = repo._create_session(
+            connection,
+            "spatial",
+            "live",
+            "bottle",
+            "cup",
+            recipe_snapshot=build_recipe_snapshot("spatial", recipe_version="2.0.0"),
+        )["session"]
     submit(repo, session, frame(), "baseline")
     assert worker.once()
     session = repo.snapshot(session["id"])

@@ -1,6 +1,5 @@
 import type { Capture, Connection, Session } from './api';
 import { CaptureMedia } from './Evidence';
-import { appearanceNeedsReview } from './captureGuidance';
 import './pair-progress.css';
 
 type PairProgressProps = {
@@ -62,11 +61,10 @@ export function PairProgress({ session, connection, baseline = session.baseline,
       const checking = !capture && (attempt?.status === 'queued' || attempt?.status === 'running');
       const current = !published && !capture && (first || Boolean(baseline));
       const retry = current && attempt && !checking;
-      const reviewAttempt = !published && !first && !capture && appearanceNeedsReview(attempt?.result, attempt);
       const review = Boolean(capture && humanReview && !published);
-      const status = published || capture ? review ? 'Saved for review' : 'Saved' : reviewAttempt ? 'Needs review' : checking ? 'Checking…' : retry ? 'Try again' : current ? first ? 'Do this first' : 'Do this now' : 'Then do this';
+      const status = published || capture ? review ? 'Saved for review' : 'Saved' : checking ? 'Checking…' : retry ? 'Try again' : current ? first ? 'Do this first' : 'Do this now' : 'Then do this';
       const statusLabel = `${spatial ? 'Photo' : 'Recording'} ${index + 1} ${status.toLowerCase()}`;
-      const state = review || reviewAttempt ? 'review' : capture || published ? 'saved' : current ? 'current' : 'next';
+      const state = review ? 'review' : capture || published ? 'saved' : current ? 'current' : 'next';
       const resetThis = resetPending === slot;
       const canRetake = first ? canRetakeFirst : canRetakeSecond;
       const onRetake = first ? onRetakeFirst : onRetakeSecond;

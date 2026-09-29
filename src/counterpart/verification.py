@@ -1005,6 +1005,19 @@ def baseline_authorization_binding(recipe_snapshot: dict, baseline: dict) -> dic
     }
 
 
+def _canonical_zero(value: Any) -> Any:
+    """Match JSONB's unsigned zero without mutating recorded input evidence."""
+    if isinstance(value, float) and value == 0:
+        return 0.0
+    if isinstance(value, dict):
+        return {key: _canonical_zero(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_canonical_zero(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_canonical_zero(item) for item in value)
+    return value
+
+
 def verify(
     recipe: str,
     slot: str,
@@ -1020,9 +1033,9 @@ def verify(
 ) -> dict:
     """Execute the exact registered recipe; v1 semantics remain unchanged.
 
-    Visual v2 requires server-readable original bytes. Its unknown clauses are
-    review candidates, never automatic acceptance. Known failures dominate
-    unknowns, including failures independent of an uncertain detector result.
+    Visual recipes require server-readable original bytes and passing controls.
+    Version 2.1 uses registration-aware appearance comparisons. All unknowns
+    and known failures block acceptance. Historical decisions stay exact.
     """
     if recipe_snapshot is not None:
         from .recipes import RecipeContractError, assert_runtime_compatible, validate_recipe_snapshot
@@ -1062,7 +1075,7 @@ def verify(
         return result
     from .visual_checks import InvalidVisualEvidence, evaluate_visual_controls
 
-    result["verifier_version"] = "counterpart-verifier/2.0.0"
+    result["verifier_version"] = snapshot["verifier"]["version"]
     result["recipe_snapshot_sha256"] = snapshot["snapshot_sha256"]
     result["hard_error"] = result["code"] in HARD_ERROR_CODES
     for check in result["checks"]:
@@ -1124,6 +1137,7 @@ def verify(
                     object_b=object_b,
                     protected_objects=snapshot["protected_objects"],
                     media_reader=media_reader,
+                    version=snapshot["verifier"]["visual"]["version"],
                 )
                 result["checks"].extend(visual["checks"])
                 result["evidence"]["visual"] = visual["evidence"]
@@ -1138,7 +1152,10 @@ def verify(
                         "detail": "Original image bytes do not match their evidence record.",
                     }
                 )
-    outcomes = {check["outcome"] for check in result["checks"]}
+    # Every measured control is required. Unknown is never treated as a pass,
+    # even if an implementation accidentally emits advisory presentation fields.
+    required_checks = result["checks"]
+    outcomes = {check["outcome"] for check in required_checks}
     result["hard_error"] = result["hard_error"] or any(
         check["outcome"] == "fail" and check.get("code") in HARD_ERROR_CODES for check in result["checks"]
     )
@@ -1147,7 +1164,12 @@ def verify(
     result["evidence"]["can_complete_pair"] = result["accepted"] and slot == "counterpart"
     result["evidence"]["limitations"].extend(snapshot["limitations"][len(LIMITATIONS) :])
     if not result["accepted"]:
-        reason = next(c for c in result["checks"] if c["outcome"] == result["outcome"])
+        reason = next(c for c in required_checks if c["outcome"] == result["outcome"])
         result["code"] = reason.get("code", result["code"])
         result["message"] = reason["detail"]
+    if snapshot["recipe_version"] == "2.1.0":
+        # JSONB canonicalizes -0.0 to +0.0. Emit the same finite value so an
+        # independent replay has byte-identical canonical JSON after storage.
+        # Historical versions keep their original serialized decisions exactly.
+        return _canonical_zero(result)
     return result

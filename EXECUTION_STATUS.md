@@ -1,3 +1,64 @@
+# Automatic capture repaired with required appearance checks — 2026-09-29
+
+This entry supersedes the review-detour entry below. The forced standalone review
+route is removed. A proposed appearance-unknown warning waiver was rejected before
+production deployment: changing admission policy was not an appearance fix.
+
+New live recipe/verifier 2.1.0 pins visual/appearance comparator 2.0.0. Stationary
+objects compare registered pixels after illumination correction estimated from shared
+background. Separated moved objects compare silhouettes and foreground color against
+the background exposed in the other photo. Strong prior pixel-change failures remain
+blocking. Every unknown/fail clause still blocks; appearance is never silently waived.
+Historical 1.0/2.0 contracts/results remain exact. Measurements establish bounded
+shape/color consistency, not physical identity or exhaustive texture continuity.
+
+Four saved valid physical attempts now pass both bottle and cup appearance checks.
+The earlier moved-cup attempt remains blocked. Eight altered-original-image controls
+(recoloring, replacement, inversion, shuffling, partial texture erasure) remain blocked.
+These are repair/calibration evidence from repeated scenes, not held-out accuracy.
+23 generated comparator tests passed, including transparent objects and refusal guards.
+
+Saved standalone 2.0 pairs with appearance-only uncertainty automatically recheck
+under 2.1 into a derived session using exact original media/model observations. The
+source history is immutable; receipts are authenticated/idempotent and source commits
+are revision/epoch fenced. Capture times, source links, split grouping and camera
+orientation survive derivation/reload/retakes. No new perception call is needed.
+Frozen campaigns and human-authorized sources retain their original contract.
+
+Executed actual compiled UI + real API + isolated PostgreSQL with copies of the latest
+user originals: strict 2.1 passed all 19 counterpart checks, then Save, ZIP download,
+reload and independent PortableRelease validation passed. Original media/model
+observations matched exactly. No camera/provider calls, new jobs/reservations,
+production-session mutations, browser errors or 390px overflow. Isolated schema/server
+were removed. Private screenshots/ZIP/report are ignored under
+artifacts/qa/automatic-appearance; no session credentials were persisted there.
+
+Full Python run with explicit isolated PostgreSQL DSN: 1,138 passed, no skips; includes
+21 recheck race/capability/immutability/archive tests. Additional comparator tests
+completed afterward: 23 passed. TypeScript/Vite, Ruff and diff checks passed.
+All 61 browser tests passed, including automatic recheck, lost acknowledgements,
+orientation preservation, both retakes, capture countdown/Space, and existing product flows.
+
+Independent hosted Roboflow CLIP diagnostic used 29 successful embeddings and one
+failed Perception Encoder request (actual endpoint 404 despite advertised schema).
+40 units reserved atomically; total ledger 96/512, with unused units retained.
+Header-only CLIP ViT-L-14 worked; actual bottle similarities .9443–.9641 exceeded the
+synthetic altered-object controls (highest .9246). This small diagnostic corroborates
+the repair investigation, not a calibrated identity gate. CLIP is not in the production
+acceptance path. No local ML or Modal compute. Approximate successful-call usage
+0.00544 Roboflow credits at published pricing. Private artifacts remain ignored under
+artifacts/qa/appearance-review/hosted-embedding-v1. Official references:
+https://docs.roboflow.com/deployment/roboflow-cloud/serverless-api/model-pricing
+https://docs.opencv.org/4.x/d7/dff/tutorial_feature_homography.html
+
+Running http://127.0.0.1:8080 with rebuilt bundle index-D4_EPW1O.js, API PID 54155 /
+exec session 98226 and worker exec session 62703. Both processes restarted after
+confirming no active jobs. Actual health advertises saved_pair_recheck=true and both
+live recipe versions 2.1.0. Refresh the existing collector page to recheck saved photos.
+No remote push or public deployment.
+
+---
+
 # Transparent-bottle appearance uncertainty: direct review path — 2026-09-29
 
 Latest physical spatial pairs now pass geometry and background registration. They

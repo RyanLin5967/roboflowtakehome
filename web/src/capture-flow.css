@@ -33,7 +33,6 @@
 .capture-flow .verification-message p { font-size: 13px; }
 .capture-flow .verification-checks { margin-top: 10px; }
 .capture-flow .check-details summary { font-size: 13px; padding: 10px 0; }
-.capture-flow .recapture-option { font-size: 13px; line-height: 1.5; margin-top: 12px; text-align: left; }
 .capture-flow .evidence-section { margin-top: 24px; }
 .capture-flow .evidence-heading .eyebrow { display: none; }
 .capture-flow .evidence-heading strong { font-size: 14px; }
@@ -65,7 +64,6 @@
   .capture-flow .instruction-panel > .human-provenance,
   .capture-flow .instruction-panel > .collector-review,
   .capture-flow .instruction-panel > .manifest-link { margin: 12px 18px; width: auto; }
-  .capture-flow .instruction-panel > .recapture-option { margin: 12px 18px; }
   .capture-flow .main-media { min-height: 0; }
 }
 

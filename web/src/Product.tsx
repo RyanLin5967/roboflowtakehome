@@ -57,11 +57,6 @@ export default function Product() {
   const [route, setRoute] = useState(() => window.location.hash.slice(1));
   useEffect(() => { const update = () => setRoute(window.location.hash.slice(1)); window.addEventListener('hashchange', update); return () => window.removeEventListener('hashchange', update); }, []);
   if (route.startsWith('/join/')) return <Join token={route.slice(6)} key={route}/>;
-  const evidenceRoute = route.match(/^\/workspace\/evidence\/([a-zA-Z0-9-]+)(?:\?(.*))?$/);
-  if (evidenceRoute) {
-    const selection = new URLSearchParams(evidenceRoute[2] || '');
-    return <Workspace key={route} evidenceSessionId={evidenceRoute[1]} initialBaseline={selection.get('baseline') || undefined} initialCounterpart={selection.get('counterpart') || undefined}/>;
-  }
   if (route.startsWith('/workspace')) return <Workspace/>;
   if (route === '/library') return <Library/>;
   return <CaptureApp key={route}/>;

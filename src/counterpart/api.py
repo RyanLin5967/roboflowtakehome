@@ -16,7 +16,16 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .archives import archive_response
 from .config import Settings, settings
 from .lifecycle import MaintenanceBusy
-from .models import CaptureMetadata, CreateSession, Publish, Replay, ResetCapture, Resume, RetryCapture
+from .models import (
+    CaptureMetadata,
+    CreateSession,
+    Publish,
+    RecheckPair,
+    Replay,
+    ResetCapture,
+    Resume,
+    RetryCapture,
+)
 from .object_storage import MediaUnavailable, create_media_store
 from .operator_api import mount_operator
 from .recipes import recipe_catalogue
@@ -195,6 +204,7 @@ def create_app(config: Settings | None = None, repository: Repository | None = N
             "provider": "roboflow",
             "model_id": config.roboflow_model,
             "replay_available": True,
+            "saved_pair_recheck": True,
             "inference_limit": config.inference_limit,
             "export_enabled": config.export_enabled and bool(config.export_project),
             **({"metrics": counters} if not config.require_operator else {}),
@@ -251,6 +261,14 @@ def create_app(config: Settings | None = None, repository: Repository | None = N
     @app.post("/api/sessions/{session_id}/reset")
     def reset(session_id: str, body: ResetCapture, session: Session):
         return repo.reset_capture(session_id, **body.model_dump())
+
+    @app.post("/api/sessions/{session_id}/recheck")
+    def recheck(session_id: str, body: RecheckPair, session: Session, request: Request):
+        from .recheck import PairRecheck, derived_token
+
+        parent_token = request.headers["authorization"].removeprefix("Bearer ")
+        token = derived_token(parent_token, session_id, body.idempotency_key)
+        return PairRecheck(repo, media).run(session_id, token=token, **body.model_dump())
 
     @app.post("/api/sessions/{session_id}/captures", status_code=202)
     def capture(

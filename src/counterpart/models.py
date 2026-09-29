@@ -49,6 +49,12 @@ class Publish(StrictModel):
     expected_revision: int = Field(ge=0)
 
 
+class RecheckPair(StrictModel):
+    expected_revision: int = Field(ge=0)
+    epoch: int = Field(ge=0)
+    idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[a-zA-Z0-9_.-]+$")
+
+
 class CaptureMetadata(StrictModel):
     slot: Literal["baseline", "counterpart", "recovery", "preview"]
     expected_revision: int = Field(ge=0)

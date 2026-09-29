@@ -23,7 +23,8 @@ ObjectClass = Literal["bottle", "cup", "book", "cell phone", "mouse"]
 SUPPORTED_OBJECTS: tuple[ObjectClass, ...] = ("bottle", "cup", "book", "cell phone", "mouse")
 SNAPSHOT_SCHEMA_VERSION = "counterpart.recipe/1"
 CURRENT_RECIPE_VERSION = "1.0.0"
-LIVE_RECIPE_VERSION = "2.0.0"
+LIVE_RECIPE_VERSION = "2.1.0"
+VISUAL_RECIPE_VERSIONS = ("2.0.0", LIVE_RECIPE_VERSION)
 
 
 class RecipeParameters(BaseModel):
@@ -138,6 +139,34 @@ _V2_VISUAL_LIMITATIONS = (
     "Protected-object checks cover only declared, confidently detected classes; detector omissions "
     "and undeclared scene changes can escape these checks.",
 )
+_V21_APPEARANCE_METHOD = (
+    "registered background-relative silhouette and color; stationary photometric agreement"
+)
+_V21_APPEARANCE_THRESHOLDS = (
+    ("minimum_background_pixels", 1024),
+    ("background_margin_pixels", 12),
+    ("minimum_object_side_pixels", 16),
+    ("maximum_illumination_offset", 32.0),
+    ("maximum_background_noise", 40.0),
+    ("difference_noise_floor", 8.0),
+    ("background_noise_percentile", 95.0),
+    ("closing_kernel_pixels", 5),
+    ("profile_width", 96),
+    ("profile_height", 192),
+    ("maximum_stationary_center_delta", 0.03),
+    ("minimum_stationary_box_iou", 0.70),
+    ("maximum_moving_box_iou", 0.03),
+    ("minimum_difference_occupancy", 0.15),
+    ("minimum_silhouette_iou", 0.45),
+    ("maximum_row_profile_difference", 0.10),
+    ("maximum_foreground_color_difference", 0.12),
+    ("maximum_chromaticity_difference", 0.06),
+    ("minimum_stationary_correlation", 0.93),
+    ("maximum_stationary_pixel_difference", 0.06),
+    ("minimum_stationary_texture", 0.02),
+    ("maximum_flat_pixel_difference", 0.025),
+    ("maximum_alternate_object_overlap", 0.05),
+)
 
 
 @dataclass(frozen=True)
@@ -168,13 +197,13 @@ def get_recipe(recipe: str, version: str = CURRENT_RECIPE_VERSION) -> RecipeDefi
     for definition in _DEFINITIONS:
         if definition.recipe == recipe and definition.version == version:
             return definition
-        if definition.recipe == recipe and version == LIVE_RECIPE_VERSION:
+        if definition.recipe == recipe and version in VISUAL_RECIPE_VERSIONS:
             return RecipeDefinition(
                 recipe,
                 definition.title,
                 definition.description,
-                LIVE_RECIPE_VERSION,
-                "counterpart-verifier/2.0.0",
+                version,
+                f"counterpart-verifier/{version}",
             )
     raise RecipeContractError("Choose a supported recipe and exact recipe version.")
 
@@ -294,7 +323,7 @@ def build_recipe_snapshot(
         "limitations": list(_V1_LIMITATIONS),
         "snapshot_sha256": "",
     }
-    if recipe_version == LIVE_RECIPE_VERSION:
+    if recipe_version in VISUAL_RECIPE_VERSIONS:
         snapshot["schema_version"] = "counterpart.recipe/2"
         snapshot["protected_objects"] = sorted(parameters.protected_objects)
         snapshot["verifier"]["visual"] = {
@@ -335,6 +364,19 @@ def build_recipe_snapshot(
                 ],
             ]
         )
+        if recipe_version == "2.1.0":
+            snapshot["verifier"]["visual"]["version"] = "counterpart-visual/2.0.0"
+            snapshot["verifier"]["visual"]["appearance"] = {
+                "version": "counterpart-appearance/2.0.0",
+                "method": _V21_APPEARANCE_METHOD,
+                "thresholds": dict(_V21_APPEARANCE_THRESHOLDS),
+            }
+            snapshot["limitations"].append(
+                "Moving-object appearance compares registered exposed-background silhouettes and "
+                "illumination-corrected color; stationary appearance compares aligned pixels. "
+                "These measurements do not establish physical identity or unchanged texture. "
+                "Clear raw-pixel appearance changes still fail. Every unknown control blocks acceptance."
+            )
     payload = {key: value for key, value in snapshot.items() if key != "snapshot_sha256"}
     snapshot["snapshot_sha256"] = hashlib.sha256(_canonical(payload).encode("ascii")).hexdigest()
     return snapshot
@@ -370,17 +412,36 @@ def assert_runtime_compatible(value: Any) -> None:
     version = (
         VERIFIER_VERSION
         if snapshot["recipe_version"] == CURRENT_RECIPE_VERSION
-        else "counterpart-verifier/2.0.0"
+        else f"counterpart-verifier/{snapshot['recipe_version']}"
     )
     if verifier["version"] != version or _canonical(verifier["thresholds"]) != _canonical(THRESHOLDS):
         raise RecipeContractError("The running verifier cannot execute this recipe version unchanged.")
-    if snapshot["recipe_version"] == LIVE_RECIPE_VERSION:
-        from .visual_checks import VISUAL_THRESHOLDS, VISUAL_VERSION
+    if snapshot["recipe_version"] in VISUAL_RECIPE_VERSIONS:
+        from .visual_checks import (
+            REGISTERED_APPEARANCE_VISUAL_VERSION,
+            VISUAL_THRESHOLDS,
+            VISUAL_VERSION,
+        )
 
-        if verifier["visual"]["version"] != VISUAL_VERSION or _canonical(
+        visual_version = (
+            VISUAL_VERSION if snapshot["recipe_version"] == "2.0.0" else REGISTERED_APPEARANCE_VISUAL_VERSION
+        )
+        if verifier["visual"]["version"] != visual_version or _canonical(
             verifier["visual"]["thresholds"]
         ) != _canonical(dict(VISUAL_THRESHOLDS)):
             raise RecipeContractError("The running verifier cannot execute this visual policy unchanged.")
+        if snapshot["recipe_version"] == "2.1.0":
+            from .appearance import APPEARANCE_METHOD, APPEARANCE_THRESHOLDS, APPEARANCE_VERSION
+
+            appearance = verifier["visual"]["appearance"]
+            if (
+                appearance["version"] != APPEARANCE_VERSION
+                or appearance["method"] != APPEARANCE_METHOD
+                or _canonical(appearance["thresholds"]) != _canonical(dict(APPEARANCE_THRESHOLDS))
+            ):
+                raise RecipeContractError(
+                    "The running verifier cannot execute this appearance policy unchanged."
+                )
 
 
 def legacy_recipe_snapshot(session: Mapping[str, Any]) -> RecipeSnapshot:
