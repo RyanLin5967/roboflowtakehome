@@ -1,5 +1,20 @@
 import type { Capture, Result } from './api';
 
+/** A review route is appropriate only when appearance is the remaining uncertainty. */
+export function appearanceNeedsReview(result: Result | null | undefined, capture: Capture | null | undefined) {
+  if (!result || result.accepted || result.hard_error || result.outcome !== 'unknown' || capture?.slot !== 'counterpart') return false;
+  const unresolved = result.checks.filter(check => !check.passed);
+  return unresolved.length > 0 && unresolved.every(check => check.outcome === 'unknown' && check.name.startsWith('appearance_continuity:'));
+}
+
+export function appearanceGuidance(result: Result | null | undefined, capture: Capture | null | undefined) {
+  if (!appearanceNeedsReview(result, capture)) return null;
+  return {
+    title: 'Both photos are saved. Appearance needs review.',
+    message: 'The remaining uncertainty is how the objects look. Reflections, transparent surfaces and lighting can change the color comparison even when an object stays the same. Review these saved photos; another capture may not resolve it.',
+  };
+}
+
 // Collector advice is separate from the immutable verifier result. The detailed
 // checks and exported evidence retain the original decision and measurements.
 export function registrationGuidance(result: Result | null | undefined, capture: Capture | null | undefined, objectA: string, objectB: string) {

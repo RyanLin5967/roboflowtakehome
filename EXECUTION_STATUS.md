@@ -1,3 +1,45 @@
+# Transparent-bottle appearance uncertainty: direct review path — 2026-09-29
+
+Latest physical spatial pairs now pass geometry and background registration. They
+remain unknown solely on appearance: bounding-box RGB histograms change with a clear
+bottle's background/reflections, and small lighting shifts can also affect the cup.
+Do not tell the user to keep fixing already-passed geometry or claim automatic
+physical validation is complete.
+
+Collector appearance-only uncertainty now offers Review these two photos as its main
+action, with saved thumbnails marked Needs review and optional recapture. It opens
+an authenticated standalone-session evidence route with the exact two captures
+preselected. Labels, criteria and decision note require an actual reviewer; no
+automatic approval or rewritten machine results. Historical campaign review still
+works. The previously hidden review capability is now reachable for this user's
+standalone collection.
+
+Investigated hard-bin smoothing, continuous-bin histograms, Wasserstein color
+comparison and spatial correlation on saved pixels and synthetic negative controls.
+Smoothing still refused the newest transparent bottle; Wasserstein admitted texture
+erasure/inversion; correlation rejected legitimate moved bottles. Experimental
+verifier/version changes were fully removed. No thresholds/contracts/results were
+changed to manufacture acceptance. Probes are ignored under
+artifacts/qa/appearance-review. Relevant metric references: OpenCV histogram
+comparison (docs.opencv.org/4.13.0/d8/dc8/tutorial_histogram_comparison.html) and SciPy
+Wasserstein distance (docs.scipy.org/doc/scipy/reference/generated/scipy.stats.wasserstein_distance.html).
+
+Executed: 20 product browser tests and 2 new collector uncertainty tests passed;
+24 real PostgreSQL evidence/review attack tests passed. TypeScript/Vite and diff
+checks passed. Compiled app against the actual API loaded both user originals,
+confirmed the exact selected pair is eligible for review, required explicit labels/
+criteria, and rendered without browser errors or 390px horizontal overflow. No
+human decision was submitted on the user's behalf and no user evidence was mutated.
+An initial product-run transport failure came from simultaneous Playwright runners
+sharing a Vite server; the isolated full product rerun passed. Avoid concurrent
+runners sharing port4173.
+
+Running rebuilt UI at http://127.0.0.1:8080 ; existing API/worker unchanged. Refresh
+and choose Review these two photos. This is an explicit human-review path, not a
+claim that automatic appearance matching now passes. No model calls or remote push.
+
+---
+
 # Collector flow redesigned around the two required captures — 2026-09-29
 
 The capture screen now shows two illustrated goal cards before opening the camera:

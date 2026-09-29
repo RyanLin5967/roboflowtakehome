@@ -87,6 +87,47 @@ async function openCollection(page: Page) {
   await expect(page.getByRole('heading', { name: 'Objects, opposite stories.' })).toBeVisible();
 }
 
+test('standalone evidence route opens the selected pair with unreviewed labels and criteria', async ({ page }) => {
+  const state = await mockProduct(page, { local: true, authenticated: false });
+  await page.goto('/#/workspace/evidence/session-0001?baseline=capture-baseline&counterpart=uncertain-counterpart');
+  await expect(page.getByRole('heading', { name: 'Check the pair.' })).toBeVisible();
+  await expect(page.getByLabel('First observation for human review')).toHaveValue('capture-baseline');
+  await expect(page.getByLabel('Counterpart observation for human review')).toHaveValue('uncertain-counterpart');
+  await expect(page.getByLabel('First observation label')).toHaveValue('');
+  await expect(page.getByLabel('Counterpart label')).toHaveValue('');
+  await expect(page.getByLabel('I reviewed both original captures')).not.toBeChecked();
+  await expect(page.getByRole('button', { name: 'Record human decision' })).toBeDisabled();
+  await expect(page.getByRole('link', { name: 'Back to capture' })).toHaveAttribute('href', '#/capture');
+  expect(state.posts.map(post => post.path)).toEqual(['/api/operator/bootstrap']);
+  expect(state.requestedUrls.some(url => new URL(url).pathname === '/api/operator/campaigns')).toBe(false);
+  const evidence = state.requestedUrls.find(url => url.includes('/session-0001/evidence?'))!;
+  expect(new URL(evidence).searchParams.get('baseline_id')).toBe('capture-baseline');
+  expect(new URL(evidence).searchParams.get('counterpart_id')).toBe('uncertain-counterpart');
+  await page.getByLabel('First observation label').selectOption('left');
+  await page.getByLabel('Counterpart label').selectOption('right');
+  for (const label of ['I reviewed both original captures', 'I can identify the same objects', 'The intended relation changes', 'The reference, framing and protected objects are consistent']) await page.getByLabel(label, { exact: true }).check();
+  await page.getByLabel('Human decision note').fill('I inspected both original photos and confirmed the reference remains stationary.');
+  await page.getByRole('button', { name: 'Record human decision' }).click();
+  await expect(page.getByRole('status')).toContainText('Human decision recorded.');
+  expect(state.posts.find(post => post.path.endsWith('/adjudications'))?.body).toMatchObject({ baseline_id: 'capture-baseline', counterpart_id: 'uncertain-counterpart', labels: { baseline: 'left', counterpart: 'right' } });
+});
+
+test('standalone evidence deep link preserves operator login and never treats selection as authority', async ({ page }) => {
+  const state = await mockProduct(page, { authenticated: false });
+  await page.goto('/#/workspace/evidence/session-0001?baseline=capture-baseline&counterpart=uncertain-counterpart');
+  await expect(page.getByLabel('Operator access token')).toBeVisible();
+  expect(state.requestedUrls.some(url => url.includes('/operator/sessions/'))).toBe(false);
+  await page.getByLabel('Operator access token').fill('operator-test-secret');
+  await page.getByRole('button', { name: 'Open workspace' }).click();
+  await expect(page.getByRole('heading', { name: 'Check the pair.' })).toBeVisible();
+  await expect(page.getByLabel('Counterpart observation for human review')).toHaveValue('uncertain-counterpart');
+  await expect(page.getByRole('button', { name: 'Record human decision' })).toBeDisabled();
+  expect(state.posts.map(post => post.path)).toEqual(['/api/operator/login']);
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page.getByLabel('Operator access token')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Saved evidence decisions' })).toHaveCount(0);
+});
+
 test('operator login keeps token out of browser storage and creates supported-role collection', async ({ page }) => {
   const state = await mockProduct(page, { authenticated: false, empty: true });
   await page.goto('/#/workspace');
