@@ -47,7 +47,7 @@ function Checks({ result, objectA = 'bottle', objectB = 'cup' }: { result?: Resu
 
 function Intro({ recipe, setRecipe, mode, setMode, create, busy, health, liveEnabled }: { recipe: Recipe; setRecipe: (recipe: Recipe) => void; mode: Mode; setMode: (mode: Mode) => void; create: () => void; busy: boolean; health: string; liveEnabled: boolean }) {
   return <main className="intro">
-    <section className="intro-copy"><p className="eyebrow">A COLLECTION INSTRUMENT</p><h1>Collect the<br/><span>difference.</span></h1><p className="intro-lead">Make two observations that tell different stories. Change what matters. Keep the evidence together.</p><div className="intro-footnote"><span className="rule-line"/>Guided capture. Grounded checks. One complete pair.</div></section>
+    <section className="intro-copy"><p className="eyebrow">A COLLECTION INSTRUMENT</p><h1>Collect the<br/><span>difference.</span></h1><p className="intro-lead">{recipe === 'spatial' ? 'Take two photos: bottle left of the cup, then bottle right of the cup. Keep the cup and camera still between photos.' : 'Record two short sequences with opposite arrival orders. Keep the same camera view and starting positions.'}</p><div className="intro-footnote"><span className="rule-line"/>Guided capture. Grounded checks. One complete pair.</div></section>
     <section className="start-panel" aria-label="Start a collection"><div className="panel-heading"><span className="eyebrow">01 / CHOOSE THE CHANGE</span><span className="tiny-label">CUP + BOTTLE</span></div>
       <button className={`recipe-option ${recipe === 'spatial' ? 'selected' : ''}`} onClick={() => setRecipe('spatial')} aria-pressed={recipe === 'spatial'}><span className="recipe-icon">⇄</span><span><strong>Switch sides</strong><small>A bottle changes sides. The cup stays put.</small></span><span className="radio"/></button>
       <button className={`recipe-option ${recipe === 'temporal' ? 'selected' : ''}`} onClick={() => setRecipe('temporal')} aria-pressed={recipe === 'temporal'}><span className="recipe-icon">①②</span><span><strong>Reverse arrival order</strong><small>The same ending. A different sequence.</small></span><span className="radio"/></button>
@@ -78,6 +78,7 @@ export default function App() {
   const [pending, setPending] = useState<PendingCapture | null>(null);
   const [pendingLoadedFor, setPendingLoadedFor] = useState<string | null>(null);
   const [pendingConflict, setPendingConflict] = useState<string | null>(null);
+  const [resetIntent, setResetIntent] = useState<{ sessionId: string; expected_revision: number; epoch: number; idempotency_key: string } | null>(null);
   const [guidance, setGuidance] = useState(false);
   const [previewCount, setPreviewCount] = useState(0);
   const [showEvidence, setShowEvidence] = useState(false);
@@ -269,6 +270,11 @@ export default function App() {
     if (!connection || !session) return;
     const slot: Slot = session.recovery_required && !session.human_review_required ? 'recovery' : session.baseline ? 'counterpart' : 'baseline';
     setGuidance(false);
+    if (!await camera.startCountdown()) return;
+    const current = sessionRef.current;
+    if (needsResume.current || current?.id !== session.id || current.epoch !== session.epoch || current.revision !== session.revision) {
+      throw new Error('The session changed during the countdown. Check the scene and capture again.');
+    }
     let blobs: Blob[]; let timestamps: number[];
     if (session.recipe === 'temporal' && slot !== 'recovery') {
       const recording = await camera.recordSequence();
@@ -286,11 +292,36 @@ export default function App() {
   });
   const retry = () => act(async () => { if (pending) await sendPacket(pending); });
   const discard = () => act(async () => { if (connection) await clearPending(connection.id); setPending(null); setPendingConflict(null); setNotice('Unconfirmed local capture discarded. Saved server captures are unchanged.'); });
+  const resetFirst = () => act(async () => {
+    if (!connection || !session) return;
+    setGuidance(false);
+    const intent = resetIntent?.sessionId === session.id ? resetIntent : { sessionId: session.id, expected_revision: session.revision, epoch: session.epoch, idempotency_key: crypto.randomUUID() };
+    setResetIntent(intent);
+    let snapshot: Session;
+    try {
+      snapshot = await request<Session>(`/sessions/${connection.id}/reset`, connection, { method: 'POST', body: JSON.stringify({ expected_revision: intent.expected_revision, epoch: intent.epoch, idempotency_key: intent.idempotency_key }) });
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status < 500 && cause.status !== 429) setResetIntent(null);
+      throw cause;
+    }
+    let storageWarning = '';
+    if (pending) {
+      try { await clearPending(connection.id); }
+      catch { storageWarning = ' Browser storage could not remove the old local upload. It cannot be used for this reset pair; discard it if it reappears after a reload.'; }
+    }
+    setSession(snapshot); setPending(null); setPendingConflict(null); setResetIntent(null);
+    needsResume.current = false; outstandingPreview.current = null; previewTimes.current.clear();
+    setNotice((snapshot.latest_capture || snapshot.baseline
+      ? 'This reset was already applied. Showing the latest captures in this collection.'
+      : session.recipe === 'spatial'
+        ? `Pair reset. Take a new first photo with the ${session.object_a} on the left of the ${session.object_b}, then a second with it on the right.`
+        : 'Pair reset. Record the first sequence again, then record the opposite order.') + storageWarning);
+  });
   const publish = () => act(async () => {
     if (!session || !connection) return;
     const result = await request<{ session: Session }>(`/sessions/${connection.id}/publish`, connection, { method: 'POST', body: JSON.stringify({ expected_revision: session.revision }) }); setSession(result.session);
   });
-  const leave = () => { camera.stop(); saveConnection(null); setConnection(null); setSession(null); setPending(null); setPendingConflict(null); setError(null); setNotice(null); setGuidance(false); setPreviewCount(0); };
+  const leave = () => { camera.stop(); saveConnection(null); setConnection(null); setSession(null); setPending(null); setPendingConflict(null); setResetIntent(null); setError(null); setNotice(null); setGuidance(false); setPreviewCount(0); };
   const reconnect = () => { needsResume.current = true; setResumeTick(value => value + 1); setNotice('Reloading the saved session. A fresh scene check is required before continuing.'); };
 
   void feedbackClock;
@@ -312,7 +343,7 @@ export default function App() {
   const replayMode = session?.mode === 'replay';
   const latestMedia = latest && latest.frames?.length ? latest : session?.baseline;
   const configurationProblem = latest?.status === 'failed' && latest.error ? configurationErrors[latest.error] : undefined;
-  const actionDisabled = busy || running || network !== 'online' || !pendingLoaded || !!pending || (Boolean(configurationProblem) && !complete);
+  const actionDisabled = busy || running || network !== 'online' || !pendingLoaded || !!pending || !!resetIntent || (Boolean(configurationProblem) && !complete);
   const humanAdjudicated = Boolean(publishedManifest?.evidence_adjudication);
   const objectA = session?.object_a || 'bottle';
   const objectB = session?.object_b || 'cup';
@@ -321,15 +352,31 @@ export default function App() {
   const contractInstructions = session?.recipe_snapshot?.instructions as Record<string, unknown> | undefined;
   const contractInstruction = contractInstructions?.[recovering ? 'recovery' : second ? 'counterpart' : 'baseline'];
   const instruction = !session ? '' : complete ? 'A complete pair. Every observation attached.' : typeof contractInstruction === 'string' ? contractInstruction : recovering ? 'Your first capture is safe. Check the scene to continue.' : session.recipe === 'spatial' ? second ? `Move only the ${objectA} to the right of the ${objectB}.` : `Place the ${objectA} to the left of the ${objectB}.` : second ? `${humanize(objectB)} first. Pause. Then the ${objectA}.` : `${humanize(objectA)} first. Pause. Then the ${objectB}.`;
-  const supporting = !session ? '' : complete ? 'Both captures and their checks stay together in one versioned record.' : recovering ? session.recipe === 'temporal' ? 'Restore both objects to their starting lanes and keep the camera steady.' : `Keep the ${objectB} and camera in the same position as your saved capture.` : session.recipe === 'spatial' ? `Keep the ${objectB} in place and the camera steady. Make the gap between the objects clear.` : 'Start both objects in the left zone, one above the other. Move each into the target band. Hold the start and finish still.';
+  const supporting = !session ? '' : complete ? 'Both captures and their checks stay together in one versioned record.' : recovering ? session.recipe === 'temporal' ? 'Restore both objects to their starting lanes and keep the camera steady.' : `Your first photo is already saved. Restore that camera view and ${objectB} position to continue, or choose Retake first image to start over.` : session.recipe === 'spatial' ? `Keep the ${objectB} in place and the camera steady. Make the gap between the objects clear.` : 'Start both objects in the left zone, one above the other. Move each into the target band. Hold the start and finish still.';
   const protectedObjects = Array.isArray(session?.recipe_snapshot?.protected_objects) ? session.recipe_snapshot.protected_objects.filter((item): item is string => typeof item === 'string') : [];
-  const primaryLabel = published ? 'Download complete pair' : humanRequired ? 'Capture for human review' : complete ? 'Save the complete pair' : recovering ? 'Check current scene' : session?.recipe === 'temporal' ? second ? 'Record reverse sequence' : 'Record first sequence' : second ? 'Capture the counterpart' : 'Capture the first image';
+  const primaryLabel = published ? 'Download complete pair' : humanRequired ? 'Capture for human review' : complete ? 'Save the complete pair' : recovering ? 'Check current scene' : session?.recipe === 'temporal' ? second ? 'Record reverse sequence' : 'Record first sequence' : second ? 'Capture the second image' : 'Capture the first image';
   const onPrimary = () => {
     if (published && connection) void act(() => download(connection, 'archive'));
     else if (complete) void publish();
     else if (replayMode) void replay(recovering ? 'recovery' : second ? 'counterpart' : 'baseline');
     else void capture();
   };
+
+  useEffect(() => {
+    const onSpace = (event: KeyboardEvent) => {
+      if (event.code !== 'Space' || event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      const target = event.target;
+      // Preserve typing and native keyboard behavior on focused controls.
+      if (target instanceof Element && (target.closest('input, textarea, select, button, a, summary, [role="button"], [role="textbox"]') || (target instanceof HTMLElement && target.isContentEditable))) return;
+      if (replayMode || complete || camera.status !== 'ready') return;
+      event.preventDefault();
+      if (event.repeat || camera.countdown !== null) return;
+      if (camera.recording) camera.stopRecording();
+      else if (!actionDisabled) onPrimary();
+    };
+    window.addEventListener('keydown', onSpace);
+    return () => window.removeEventListener('keydown', onSpace);
+  }, [replayMode, complete, actionDisabled, camera.status, camera.countdown, camera.recording, camera.stopRecording, onPrimary]);
 
   return <div className="app-shell">
     <header className="topbar"><button className="brand-button" onClick={session ? () => undefined : leave} aria-label="Counterpart home"><Logo/></button><span className="topbar-caption">A little more signal.<br/>A lot less ambiguity.</span><div className="topbar-right"><a className="text-button" href="#/library">Your sessions</a><a className="text-button" href="#/workspace">Workspace</a>{session ? <><span className={`connection-status ${network}`}><span className="status-dot"/>{network === 'online' ? 'Session connected' : network === 'offline' ? 'Connection lost' : 'Connecting'}</span><button className="text-button" onClick={leave} disabled={busy || camera.recording}>New collection <span aria-hidden="true">↗</span></button></> : <span className="topbar-label">VISUAL DATA, COLLECTED WITH INTENT</span>}</div></header>
@@ -339,14 +386,15 @@ export default function App() {
     {!session && connection && <main className="loading-session"><span className="loading-dot"/><h1>Opening your saved collection.</h1><p>Your accepted captures stay with the session.</p><button className="text-button" onClick={leave}>Start a new collection</button></main>}
     {session && connection && <main className="collection">
       <div className="collection-heading"><div><p className="eyebrow">COLLECTION / {session.id.slice(0, 8).toUpperCase()}</p><h1>{titles[session.recipe]}<span className="heading-period">.</span></h1></div><div className={`source-badge ${replayMode ? 'replay' : 'live'}`}><span className="status-dot"/>{replayMode ? 'SIMULATION · TEST SCENES' : 'LIVE CAMERA · ROBOFLOW'}<small>{replayMode ? 'Deterministic data. No model calls.' : 'Cloud perception. Local camera only.'}</small></div></div>
-      <div className="steps" aria-label="Collection progress"><div className={second ? 'done' : 'current'}><span>{second ? '✓' : '01'}</span>First observation</div><span className="step-line"/><div className={complete ? 'done' : second ? 'current' : ''}><span>{complete ? '✓' : '02'}</span>The controlled change</div><span className="step-line"/><div className={published ? 'done' : complete ? 'current' : ''}><span>{published ? '✓' : '03'}</span>Complete pair</div></div>
-      {pending && <div className="pending-banner" role="status"><div><strong>A capture is waiting for confirmation.</strong><p>{pendingConflict || "Retry uses the same saved images and request identity."}</p></div><button className="secondary" disabled={busy || !!pendingConflict} onClick={retry}>Retry saved capture</button><button className="text-button" disabled={busy} onClick={discard}>Discard local copy</button></div>}
-      <div className="mobile-task"><span className="eyebrow">{recovering ? "CHECK THE SCENE" : complete ? "PAIR COMPLETE" : second ? "NEXT: THE CONTROLLED CHANGE" : "FIRST OBSERVATION"}</span><strong>{instruction}</strong></div>
+      <div className="steps" aria-label="Collection progress"><div className={second ? 'done' : 'current'}><span>{second ? '✓' : '01'}</span>{session.recipe === 'spatial' ? 'Photo 1 · Left' : 'Sequence 1'}</div><span className="step-line"/><div className={complete ? 'done' : second ? 'current' : ''}><span>{complete ? '✓' : '02'}</span>{session.recipe === 'spatial' ? 'Photo 2 · Right' : 'Sequence 2'}</div><span className="step-line"/><div className={published ? 'done' : complete ? 'current' : ''}><span>{published ? '✓' : '03'}</span>Save the pair</div></div>
+      {!complete && <div className="pair-instructions"><strong>{session.recipe === 'spatial' ? 'This task needs two photos.' : 'This task needs two recordings.'}</strong><p>{session.recipe === 'spatial' ? `First, photograph the ${objectA} to the left of the ${objectB}. Then move only the ${objectA} to the right and take the second photo. Keep the ${objectB} and camera fixed for both.` : `Record the ${objectA} arriving first, then record the ${objectB} arriving first. Keep the camera and start/end positions the same.`}</p></div>}
+      {pending && <div className="pending-banner" role="status"><div><strong>A capture is waiting for confirmation.</strong><p>{pendingConflict || "Retry uses the same saved images and request identity."}</p></div><button className="secondary" disabled={busy || !!pendingConflict || !!resetIntent} onClick={retry}>Retry saved capture</button><button className="text-button" disabled={busy || !!resetIntent} onClick={discard}>Discard local copy</button></div>}
+      <div className="mobile-task"><span className="eyebrow">{recovering ? "CHECK THE SCENE" : complete ? "PAIR COMPLETE" : second ? session.recipe === 'spatial' ? 'PHOTO 2 OF 2' : 'RECORDING 2 OF 2' : session.recipe === 'spatial' ? 'PHOTO 1 OF 2' : 'RECORDING 1 OF 2'}</span><strong>{instruction}</strong></div>
       <div className={`workspace ${complete ? 'complete' : ''}`}>
         <section className="capture-stage" aria-label="Capture workspace">
-          <div className="stage-toolbar"><span><span className={`status-dot ${camera.recording ? 'recording' : ''}`}/>{complete ? 'PAIRED EVIDENCE' : replayMode ? 'RECORDED TEST SCENE' : camera.recording ? `RECORDING · ${camera.elapsed.toFixed(1)} / 12s` : 'LIVE VIEW'}</span><span>{session.recipe === 'temporal' ? 'ARRIVAL ORDER' : 'IMAGE-PLANE LEFT / RIGHT'}</span></div>
+          <div className="stage-toolbar"><span><span className={`status-dot ${camera.recording ? 'recording' : ''}`}/>{complete ? 'PAIRED EVIDENCE' : replayMode ? 'RECORDED TEST SCENE' : camera.countdown !== null ? `STARTING IN ${camera.countdown}…` : camera.recording ? `RECORDING · ${camera.elapsed.toFixed(1)} / 12s` : 'LIVE VIEW'}</span><span>{session.recipe === 'temporal' ? 'ARRIVAL ORDER' : 'IMAGE-PLANE LEFT / RIGHT'}</span></div>
           {complete && displayBaseline && displayCounterpart ? <div className="pair-grid"><div><div className="pair-label"><span>A / FIRST</span><strong>{session.recipe === 'spatial' ? `${humanize(objectA)} left` : `${humanize(objectA)} → ${objectB}`}</strong></div><CaptureMedia labels={[objectA, objectB]} capture={displayBaseline} connection={connection}/></div><div><div className="pair-label"><span>B / COUNTERPART</span><strong>{session.recipe === 'spatial' ? `${humanize(objectA)} right` : `${humanize(objectB)} → ${objectA}`}</strong></div><CaptureMedia labels={[objectA, objectB]} capture={displayCounterpart} connection={connection}/></div></div> : <div className="main-media">
-            {!replayMode && <div className="camera-shell" style={camera.status === 'ready' && camera.dimensions.width ? { aspectRatio: `${camera.dimensions.width} / ${camera.dimensions.height}` } : undefined}><video ref={camera.videoRef} autoPlay muted playsInline className={camera.status === 'ready' ? '' : 'camera-hidden'} style={{ transform: camera.mirrored ? 'scaleX(-1)' : undefined }} aria-label="Live camera view"/>{camera.status !== 'ready' && <div className="camera-placeholder"><SetupDiagram objectA={objectA} objectB={objectB} temporal={session.recipe === 'temporal'}/><div className="camera-start"><button className="primary" disabled={camera.status === 'requesting' || !pendingLoaded} onClick={camera.start}>{camera.status === 'requesting' ? 'Allow camera access…' : 'Open camera'}<Arrow/></button><p>Camera permission is requested by your browser.</p></div></div>}{session.recipe === 'temporal' && camera.status === 'ready' && <div className="zone-overlay" aria-hidden="true"><div className="start-zone"><span>START HERE</span></div><div className="target-zone"><span>TARGET AREA</span></div></div>}{camera.status === 'ready' && session.recipe === 'spatial' && !!session.baseline && <ReferenceGhost session={session} width={camera.dimensions.width} height={camera.dimensions.height}/>}{camera.recording && <div className="recording-chip"><span/>{camera.frameCount} frames saved</div>}</div>}
+            {!replayMode && <div className="camera-shell" style={camera.status === 'ready' && camera.dimensions.width ? { aspectRatio: `${camera.dimensions.width} / ${camera.dimensions.height}` } : undefined}><video ref={camera.videoRef} autoPlay muted playsInline className={camera.status === 'ready' ? '' : 'camera-hidden'} style={{ transform: camera.mirrored ? 'scaleX(-1)' : undefined }} aria-label="Live camera view"/>{camera.status !== 'ready' && <div className="camera-placeholder"><SetupDiagram objectA={objectA} objectB={objectB} temporal={session.recipe === 'temporal'}/><div className="camera-start"><button className="primary" disabled={camera.status === 'requesting' || !pendingLoaded} onClick={camera.start}>{camera.status === 'requesting' ? 'Allow camera access…' : 'Open camera'}<Arrow/></button><p>Camera permission is requested by your browser.</p></div></div>}{session.recipe === 'temporal' && camera.status === 'ready' && <div className="zone-overlay" aria-hidden="true"><div className="start-zone"><span>START HERE</span></div><div className="target-zone"><span>TARGET AREA</span></div></div>}{camera.status === 'ready' && session.recipe === 'spatial' && !!session.baseline && <ReferenceGhost session={session} width={camera.dimensions.width} height={camera.dimensions.height}/>}{camera.countdown !== null && <div className="capture-countdown" role="status" aria-label="Capture countdown"><span>{session.recipe === 'temporal' && !recovering ? 'Recording starts in' : 'Photo in'}</span><strong>{camera.countdown}</strong><span>Get in position. Keep the camera still.</span></div>}{camera.recording && <div className="recording-chip"><span/>{camera.frameCount} frames saved</div>}</div>}
             {replayMode && (latestMedia ? <CaptureMedia labels={[objectA, objectB]} capture={latestMedia} connection={connection}/> : <SetupDiagram objectA={objectA} objectB={objectB} temporal={session.recipe === 'temporal'}/>)}
             {second && session.baseline && <div className="baseline-thumbnail"><div><span aria-hidden="true">✓</span> FIRST CAPTURE SAVED</div><CaptureMedia labels={[objectA, objectB]} capture={session.baseline} connection={connection} small/></div>}
           </div>}
@@ -360,11 +408,12 @@ export default function App() {
           {running && <div className="verification-message checking" role="status"><span className="loading-dot"/><div><strong>{latest?.status === 'running' ? 'Checking the saved evidence' : 'Capture saved. Waiting for verification.'}</strong><p>{replayMode ? 'Evaluating the recorded test observations.' : 'Roboflow supplies detections; the recipe checks the relationship.'}</p>{session.progress && <div className="frame-progress"><progress value={session.progress.completed_frames} max={session.progress.total_frames}/><span>{session.progress.completed_frames} / {session.progress.total_frames} frames checked</span></div>}</div></div>}
           {!running && result && !humanAdjudicated && <div className={`verification-message ${result.accepted ? 'accepted' : 'rejected'}`} role="status"><span>{result.accepted ? '✓' : '!'}</span><div><strong>{result.accepted ? humanRequired ? 'Checks passed; human review required' : latest?.slot === 'recovery' ? 'Scene checked' : 'Observation accepted' : result.outcome === 'unknown' ? repairGuidance?.title || 'This observation needs a closer look.' : second ? 'Keep the first. Fix this one.' : 'This scene needs a small repair.'}</strong><p>{repairGuidance?.message || result.message}</p></div></div>}
           {!running && latest?.status === 'failed' && <div className="verification-message rejected" role="status"><span>!</span><div><strong>{configurationProblem ? 'Operator action needed' : 'Verification could not finish'}</strong><p>{configurationProblem || latest.error || 'Your saved evidence is retained. Try again after the service recovers.'}</p><button className="secondary" onClick={retryVerification} disabled={busy || recovering || network !== 'online'}>{configurationProblem ? 'Retry after the operator fixes the service' : 'Retry verification of saved images'}</button></div></div>}
-          <div className="primary-action">{camera.recording ? <button className="primary recording-button" onClick={camera.stopRecording}>Stop & check sequence <span>■</span></button> : <button className="primary" onClick={onPrimary} disabled={actionDisabled || (!replayMode && !complete && camera.status !== 'ready')}>{busy ? 'Saving…' : running ? 'Checking…' : primaryLabel}<Arrow/></button>}<p>{published ? 'ZIP includes the manifest and original evidence.' : humanRequired ? 'Saved for operator review. Capturing does not publish a dataset pair.' : replayMode ? 'Simulation only. Nothing is sent to a Roboflow dataset.' : session.recipe === 'temporal' && !complete ? '4 sampled frames / second · 12 seconds maximum' : 'The saved capture is checked separately from live guidance.'}</p></div>
+          <div className="primary-action">{camera.countdown !== null ? <button className="primary" onClick={camera.cancelCountdown}>Cancel countdown <span aria-hidden="true">×</span></button> : camera.recording ? <button className="primary recording-button" onClick={camera.stopRecording}>Stop & check sequence <span>■</span></button> : <button className="primary" onClick={onPrimary} disabled={actionDisabled || (!replayMode && !complete && camera.status !== 'ready')}>{busy ? 'Saving…' : running ? 'Checking…' : primaryLabel}<Arrow/></button>}<p>{published ? 'ZIP includes the manifest and original evidence.' : humanRequired ? 'Saved for operator review. Capturing does not publish a dataset pair.' : replayMode ? 'Simulation only. Nothing is sent to a Roboflow dataset.' : session.recipe === 'temporal' && !complete ? 'Space to start or stop · 2-second countdown · 12 seconds maximum' : 'Press Space or click capture · 2-second countdown.'}</p></div>
+          {!published && (second || latest || pending || resetIntent) && <div className="reset-first"><button className="secondary" onClick={resetFirst} disabled={busy || camera.recording || network !== 'online' || !pendingLoaded}>{resetIntent ? 'Retry reset' : session.recipe === 'spatial' ? 'Retake first image' : 'Retake first sequence'}</button><p>Clears the current pair so you can start from a new setup.</p></div>}
           {protectedObjects.length > 0 && !complete && <p className="protected-capture-note">Also keep {protectedObjects.join(", ")} visible and still. The camera and background are part of the recorded controls.</p>}<Checks result={result} objectA={objectA} objectB={objectB}/>
           {humanRequired && !published && <div className="human-provenance"><strong>Collecting for human review</strong><p>The operator authorized this uncertain baseline so you can capture its counterpart. An operator must establish the final pair from both original observations.{session.recovery_required ? ' The scene has not been reverified after reconnection; that uncertainty remains recorded.' : ''}</p></div>}{humanAdjudicated && <div className="human-provenance"><strong>Established by human review</strong><p>The original machine decision remains recorded. This pair was established by a separate human adjudication.</p></div>}{published && session.campaign_id && <div className={`collector-review ${session.review?.status || 'pending'}`} role="status"><strong>{session.review?.status === 'approved' ? 'Approved for this collection' : session.review?.status === 'rejected' ? 'The reviewer rejected this pair' : session.review?.status === 'needs_revision' ? 'The reviewer requested another pair' : 'Saved. Awaiting operator review.'}</strong>{session.review?.reason && <p>{session.review.reason}</p>}{['rejected', 'needs_revision'].includes(session.review?.status || '') && <p>The original evidence is preserved. Use your invitation to collect a new pair, or contact the collection owner.</p>}</div>}
           {published && <button className="text-button manifest-link" onClick={() => act(() => download(connection, 'manifest'))}>Download manifest JSON <Arrow/></button>}
-          {second && !complete && <div className="preserved-note"><span>↳</span><p>Your first observation stays saved through retries and reconnects.</p></div>}
+          {second && !complete && <div className="preserved-note"><span>↳</span><p>Your first capture stays saved until you choose to retake it.</p></div>}
         </aside>
       </div>
       {session.baseline && latest?.status === 'rejected' && latest.id !== session.baseline.id && <section className="repair-evidence" aria-label="Compare the rejected capture"><p className="eyebrow">KEEP WHAT WORKED</p><h2>{humanRequired ? 'Review the recorded difference.' : 'Compare. Repair. Continue.'}</h2><p>{result?.message} The reference is preserved below; the rejected attempt is saved separately.</p><div className="repair-grid"><div><h3>{humanRequired ? 'A / First recorded observation' : 'A / Accepted reference'}</h3><CaptureMedia capture={session.baseline} connection={connection} labels={[objectA, objectB]}/></div><div><h3>{humanRequired ? 'B / Counterpart for review' : 'B / Attempt to repair'}</h3><CaptureMedia capture={latest} connection={connection} labels={[objectA, objectB]}/></div></div></section>}

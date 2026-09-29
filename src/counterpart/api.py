@@ -16,7 +16,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .archives import archive_response
 from .config import Settings, settings
 from .lifecycle import MaintenanceBusy
-from .models import CaptureMetadata, CreateSession, Publish, Replay, Resume, RetryCapture
+from .models import CaptureMetadata, CreateSession, Publish, Replay, ResetCapture, Resume, RetryCapture
 from .object_storage import MediaUnavailable, create_media_store
 from .operator_api import mount_operator
 from .recipes import recipe_catalogue
@@ -247,6 +247,10 @@ def create_app(config: Settings | None = None, repository: Repository | None = N
     @app.post("/api/sessions/{session_id}/resume")
     def resume(session_id: str, body: Resume, session: Session):
         return repo.resume(session_id, body.expected_epoch)
+
+    @app.post("/api/sessions/{session_id}/reset")
+    def reset(session_id: str, body: ResetCapture, session: Session):
+        return repo.reset_capture(session_id, **body.model_dump())
 
     @app.post("/api/sessions/{session_id}/captures", status_code=202)
     def capture(

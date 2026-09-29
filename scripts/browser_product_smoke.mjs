@@ -31,7 +31,7 @@ try {
     await collector.goto(link);
     await collector.getByRole('button', { name: /^Start collecting/ }).click();
     const first = recipe === 'spatial' ? 'Capture the first image' : 'Record first sequence';
-    const second = recipe === 'spatial' ? 'Capture the counterpart' : 'Record reverse sequence';
+    const second = recipe === 'spatial' ? 'Capture the second image' : 'Record reverse sequence';
     await collector.getByRole('button', { name: first, exact: true }).click();
     await expect(collector.getByRole('button', { name: second, exact: true })).toBeEnabled({ timeout: 15000 });
     await collector.getByRole('button', { name: recipe === 'spatial' ? 'Move the reference' : 'Wrong order', exact: true }).click();

@@ -525,6 +525,66 @@ class Repository:
                 self._event(connection, session_id, "session_resumed", epoch=session["epoch"] + 1)
             return self._snapshot(connection, session_id)
 
+    def reset_capture(
+        self, session_id: str, expected_revision: int, epoch: int, idempotency_key: str
+    ) -> dict:
+        """Start a fresh pair while retaining its collection contract and old evidence.
+
+        Clearing pointers is deliberately separate from deleting evidence. The
+        revision/epoch fence and invalidated leases prevent old worker results or
+        browser uploads from restoring the discarded first observation. A durable
+        event receipt makes a lost-response retry harmless even after new captures.
+        """
+        if not re.fullmatch(r"[a-zA-Z0-9_.-]{8,128}", idempotency_key):
+            raise Conflict("invalid_reset_key", "Use a new valid reset key")
+        request = {"expected_revision": expected_revision, "epoch": epoch}
+        with self._connection() as connection:
+            session = self._session(connection, session_id, lock=True)
+            prior = connection.execute(
+                "SELECT data FROM counterpart_events WHERE session_id=%s "
+                "AND kind='capture_reset' AND data->>'idempotency_key'=%s",
+                (session_id, idempotency_key),
+            ).fetchone()
+            if prior is not None:
+                if prior["data"]["request"] != request:
+                    raise Conflict("idempotency_mismatch", "This reset key belongs to another request")
+                return self._snapshot(connection, session_id)
+            published = connection.execute(
+                "SELECT 1 FROM counterpart_pairs WHERE session_id=%s", (session_id,)
+            ).fetchone()
+            if session["state"] == "published" or published:
+                raise Conflict("already_published", "This pair is published. Start a new collection instead.")
+            if expected_revision != session["revision"]:
+                raise Conflict(
+                    "stale_revision", "A newer capture changed this pair. Reload before resetting."
+                )
+            if epoch != session["epoch"]:
+                raise Conflict("stale_epoch", "This camera session changed. Reload before resetting.")
+            self._supersede(connection, session_id, ("baseline", "counterpart", "preview", "recovery"))
+            connection.execute(
+                "UPDATE counterpart_sessions SET revision=revision+1,epoch=epoch+1,state='collecting',"
+                "baseline_id=NULL,counterpart_id=NULL,latest_capture_id=NULL,feedback_capture_id=NULL,"
+                "baseline_authorization=NULL,recovery_required=false,feedback_seq=-1,latest_preview_seq=-1 "
+                "WHERE id=%s",
+                (session_id,),
+            )
+            self._event(
+                connection,
+                session_id,
+                "capture_reset",
+                idempotency_key=idempotency_key,
+                request=request,
+                revision=session["revision"] + 1,
+                epoch=session["epoch"] + 1,
+                previous_baseline_id=session["baseline_id"],
+                previous_counterpart_id=session["counterpart_id"],
+                previous_latest_capture_id=session["latest_capture_id"],
+                previous_baseline_authorization_id=(
+                    session["baseline_authorization"]["id"] if session["baseline_authorization"] else None
+                ),
+            )
+            return self._snapshot(connection, session_id)
+
     @staticmethod
     def _supersede(connection, session_id: str, slots: tuple[str, ...], *, pending_only: bool = False):
         condition = (

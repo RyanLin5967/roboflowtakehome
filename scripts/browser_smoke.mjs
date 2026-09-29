@@ -22,7 +22,7 @@ try {
     if (recipe === 'temporal') await page.getByRole('button', { name: /Reverse arrival order/ }).click();
     await page.getByRole('button', { name: 'Open replay session' }).click();
     const first = recipe === 'spatial' ? 'Capture the first image' : 'Record first sequence';
-    const second = recipe === 'spatial' ? 'Capture the counterpart' : 'Record reverse sequence';
+    const second = recipe === 'spatial' ? 'Capture the second image' : 'Record reverse sequence';
     await page.getByRole('button', { name: first, exact: true }).click();
     await expect(page.getByRole('button', { name: second, exact: true })).toBeEnabled({ timeout: 15000 });
     await page.getByRole('button', { name: recipe === 'spatial' ? 'Move the reference' : 'Wrong order', exact: true }).click();

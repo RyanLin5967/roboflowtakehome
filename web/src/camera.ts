@@ -39,7 +39,36 @@ export function useCamera(onDiscontinuity: () => void, options: CameraOptions = 
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [frameCount, setFrameCount] = useState(0);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const countdownWaiter = useRef<{ resolve: (ready: boolean) => void; timer: ReturnType<typeof setTimeout> } | null>(null);
   const generation = useRef(0);
+
+  const cancelCountdown = useCallback(() => {
+    const current = countdownWaiter.current;
+    if (!current) return;
+    clearTimeout(current.timer); countdownWaiter.current = null;
+    if (mounted.current) setCountdown(null);
+    current.resolve(false);
+  }, []);
+
+  const startCountdown = useCallback((): Promise<boolean> => {
+    if (countdownWaiter.current || recorder.current) return Promise.resolve(false);
+    if (document.hidden || !stream.current?.getVideoTracks().some(track => track.readyState === 'live' && !track.muted) || (videoRef.current?.readyState ?? 0) < 2) {
+      return Promise.reject(new Error('The camera is not ready. Keep this tab open and try again.'));
+    }
+    setCountdown(2);
+    return new Promise(resolve => {
+      const current = { resolve, timer: setTimeout(() => {
+        if (countdownWaiter.current !== current) return;
+        setCountdown(1);
+        current.timer = setTimeout(() => {
+          if (countdownWaiter.current !== current) return;
+          countdownWaiter.current = null; setCountdown(null); resolve(true);
+        }, 1000);
+      }, 1000) };
+      countdownWaiter.current = current;
+    });
+  }, []);
 
   const takePhoto = useCallback(async (): Promise<Blob> => {
     const video = videoRef.current;
@@ -70,13 +99,15 @@ export function useCamera(onDiscontinuity: () => void, options: CameraOptions = 
   }, []);
 
   const interrupt = useCallback((message: string) => {
+    cancelCountdown();
     finish(true, message);
     if (mounted.current) setError(message);
     onDiscontinuityRef.current();
-  }, [finish]);
+  }, [cancelCountdown, finish]);
 
   const stop = useCallback(() => {
     generation.current += 1;
+    cancelCountdown();
     finish(true, 'The camera stopped during recording. Record this clip again.');
     if (videoRef.current && callbackRef.current !== null) videoRef.current.cancelVideoFrameCallback?.(callbackRef.current);
     callbackRef.current = null;
@@ -84,11 +115,11 @@ export function useCamera(onDiscontinuity: () => void, options: CameraOptions = 
     stream.current = null;
     if (videoRef.current) { videoRef.current.srcObject = null; videoRef.current.onresize = null; }
     if (mounted.current) setStatus('off');
-  }, [finish]);
+  }, [cancelCountdown, finish]);
 
   const setMirrored = useCallback((value: boolean): boolean => {
     const current = optionsRef.current;
-    if (recorder.current || current.orientationLocked || current.hasSavedEvidence || !stream.current) return false;
+    if (countdownWaiter.current || recorder.current || current.orientationLocked || current.hasSavedEvidence || !stream.current) return false;
     if (value === mirroredRef.current) return true;
     if (!saveOrientation(current.sessionId, value)) {
       setError('This browser could not save the camera orientation. Keep the current view, or enable browser storage before starting a new pair.');
@@ -200,8 +231,9 @@ export function useCamera(onDiscontinuity: () => void, options: CameraOptions = 
     mounted.current = true;
     const visibility = () => { if (document.hidden && stream.current) interrupt('Capture paused while this page was hidden. Your saved first capture is safe.'); };
     document.addEventListener('visibilitychange', visibility);
-    return () => { mounted.current = false; document.removeEventListener('visibilitychange', visibility); stop(); };
-  }, [interrupt, stop]);
+    window.addEventListener('offline', cancelCountdown);
+    return () => { mounted.current = false; document.removeEventListener('visibilitychange', visibility); window.removeEventListener('offline', cancelCountdown); stop(); };
+  }, [cancelCountdown, interrupt, stop]);
 
-  return { videoRef, status, error, dimensions, mirrored, setMirrored, recording, elapsed, frameCount, start, stop, takePhoto, recordSequence, stopRecording: () => finish(false) };
+  return { videoRef, status, error, dimensions, mirrored, setMirrored, countdown, startCountdown, cancelCountdown, recording, elapsed, frameCount, start, stop, takePhoto, recordSequence, stopRecording: () => finish(false) };
 }

@@ -1,3 +1,39 @@
+# Countdown, Space capture, and retaking the first image — 2026-09-29
+
+Live photos, recovery photos and sequence starts now show a two-second 2→1
+countdown. Frames are captured after it finishes; sequence timing starts then.
+Cancel, hidden page, camera interruption, disconnect and navigation cancel pending
+capture. Space starts capture and stops a running sequence; typing, focused native
+controls, modifier keys and repeats keep their normal behavior. Retries reuse saved
+pixels immediately. No model executes locally.
+
+The collector flow explicitly asks for two photos: bottle left, then bottle right,
+with cup/camera fixed. Retake first image clears the active pair and comparison
+target in the same session; contracts, campaign and scene group remain unchanged.
+The reset endpoint fences older work with revision/epoch and invalidated leases,
+has a durable idempotent receipt, and refuses published pairs. Old attempts/media
+remain in history. Ambiguous client acknowledgements retain the reset request;
+browser storage cleanup failure cannot block an already successful reset.
+
+Executed: 45 browser regressions passed (1.8 minutes), followed by three focused
+reset regressions after the storage-failure refinement, including one new case.
+Backend: 61 relevant regression tests passed, then 16 focused reset tests including
+an added concurrent worker/reset race. Independent review resolved local-storage
+failure handling; TypeScript/Vite, Ruff and diff checks passed. Actual production
+UI/API/PostgreSQL/worker replay reset survived reload at 390px with no overflow;
+screenshot is ignored under artifacts/qa/capture-controls. No repair/test model
+calls and no production user-session reset were performed.
+
+Physical trial now has an accepted first spatial photo. Later recovery attempts
+remain uncertain: the original and latest photos visibly differ in background
+framing and object orientation. This is still not a completed physical pair trial.
+
+App http://127.0.0.1:8080 serves the rebuilt bundle. API restarted as PID 72304 /
+exec session 44081; existing worker PID 26433 / session 83880 stays running. Refresh
+the browser to use the new controls. No remote push.
+
+---
+
 # Camera orientation and first physical capture feedback — 2026-09-29
 
 The user began the real-camera trial. The first spatial attempts had the bottle on

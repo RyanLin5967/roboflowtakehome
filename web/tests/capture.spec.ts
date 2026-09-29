@@ -2,10 +2,11 @@ import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
 // These are browser/protocol fixtures, not CV model predictions or model-quality tests.
-async function mockService(page: Page, options: { live?: boolean; failFirstUpload?: boolean; rejectStaleRetry?: boolean } = {}) {
+async function mockService(page: Page, options: { live?: boolean; failFirstUpload?: boolean; rejectStaleRetry?: boolean; loseResetResponse?: boolean } = {}) {
   let counter = 0;
   let uploads = 0;
   const submitted: string[] = [];
+  const resets: Array<{ expected_revision: number; epoch: number; idempotency_key: string }> = [];
   const session: any = { id: 'session-1234-5678', recipe: 'spatial', mode: 'replay', object_a: 'bottle', object_b: 'cup', revision: 0, epoch: 0, state: 'collecting', recovery_required: false, baseline: null, counterpart: null, latest_capture: null, feedback: null, pair: null, events: [] };
   const makeCapture = (slot: string, accepted: boolean, message: string) => ({ id: `capture-${++counter}`, slot, status: accepted ? 'accepted' : 'rejected', revision: ++session.revision, epoch: session.epoch, created_at: new Date().toISOString(), frames: Array.from({ length: session.recipe === 'temporal' && slot !== 'recovery' ? 12 : 1 }, (_, i) => ({ asset_id: `asset-${i}`, t_ms: i * 250, width: 720, height: 440 })), result: { accepted, code: accepted ? 'accepted' : 'reference_moved', message, checks: [{ name: 'cup_position', passed: accepted, detail: accepted ? 'Reference stays within tolerance.' : 'The cup moved outside its allowed position.' }], evidence: {}, verifier_version: 'fixture-v1' }, error: null });
   await page.route('**/api/**', async route => {
@@ -21,6 +22,14 @@ async function mockService(page: Page, options: { live?: boolean; failFirstUploa
       const body = route.request().postDataJSON();
       if (body.expected_epoch === session.epoch) session.epoch++;
       session.recovery_required = !!session.baseline && !session.pair;
+      return json(session);
+    }
+    if (path.endsWith('/reset')) {
+      const body = route.request().postDataJSON();
+      const duplicate = resets.some(item => item.idempotency_key === body.idempotency_key);
+      resets.push(body);
+      if (!duplicate) Object.assign(session, { baseline: null, counterpart: null, latest_capture: null, feedback: null, baseline_authorization: null, human_review_required: false, state: 'collecting', recovery_required: false, revision: session.revision + 1, epoch: session.epoch + 1 });
+      if (options.loseResetResponse && resets.length === 1) return route.abort('failed');
       return json(session);
     }
     if (path.endsWith('/replay')) {
@@ -51,8 +60,69 @@ async function mockService(page: Page, options: { live?: boolean; failFirstUploa
     if (path === `/api/sessions/${session.id}`) return json(session);
     return json({ detail: { message: `Unexpected test request: ${path}` } }, 500);
   });
-  return { session, submitted };
+  return { session, submitted, resets };
 }
+
+test('retaking the first image clears the pair and makes the two-photo task explicit', async ({ page }) => {
+  const service = await mockService(page);
+  await page.goto('/');
+  await expect(page.getByText('Take two photos: bottle left of the cup, then bottle right of the cup. Keep the cup and camera still between photos.')).toBeVisible();
+  await page.getByRole('button', { name: 'Open replay session' }).click();
+  await expect(page.getByText('This task needs two photos.')).toBeVisible();
+  await expect(page.getByLabel('Collection progress')).toContainText('Photo 1 · Left');
+  await expect(page.getByLabel('Collection progress')).toContainText('Photo 2 · Right');
+  await page.getByRole('button', { name: 'Capture the first image' }).click();
+  await expect(page.getByRole('button', { name: 'Capture the second image' })).toBeVisible();
+  await page.getByRole('button', { name: 'Retake first image' }).click();
+  await expect(page.getByText('FIRST CAPTURE SAVED')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Capture the first image' })).toBeEnabled();
+  expect(service.resets).toHaveLength(1);
+  expect(service.session.baseline).toBeNull();
+  expect(service.session.recovery_required).toBe(false);
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Capture the first image' })).toBeEnabled();
+  await expect(page.getByText('FIRST CAPTURE SAVED')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Capture the first image' }).click();
+  await expect(page.getByRole('button', { name: 'Capture the second image' })).toBeVisible();
+});
+
+test('a lost reset acknowledgement blocks new capture until the same reset is reconciled', async ({ page }) => {
+  const service = await mockService(page, { loseResetResponse: true });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Open replay session' }).click();
+  await page.getByRole('button', { name: 'Capture the first image' }).click();
+  await page.getByRole('button', { name: 'Retake first image' }).click();
+  await expect(page.getByRole('button', { name: 'Retry reset' })).toBeEnabled();
+  await expect(page.locator('.primary-action button')).toBeDisabled();
+  await page.getByRole('button', { name: 'Retry reset' }).click();
+  await expect(page.getByRole('button', { name: 'Capture the first image' })).toBeEnabled();
+  expect(service.resets).toHaveLength(2);
+  expect(service.resets[1]).toEqual(service.resets[0]);
+  expect(service.session.epoch).toBe(1);
+});
+
+test('successful reset remains usable when deletion of a stale local upload fails', async ({ page }) => {
+  await mockService(page, { live: true, failFirstUpload: true });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Use my camera' }).click();
+  await page.getByRole('button', { name: 'Start a real capture' }).click();
+  await page.getByRole('button', { name: 'Open camera' }).click();
+  await page.getByRole('button', { name: 'Capture the first image' }).click();
+  await expect(page.getByRole('button', { name: 'Retry saved capture' })).toBeVisible();
+  await page.evaluate(() => {
+    const remove = IDBObjectStore.prototype.delete;
+    IDBObjectStore.prototype.delete = function(key) {
+      if (this.name === 'pending') throw new DOMException('Fixture browser storage unavailable', 'InvalidStateError');
+      return remove.call(this, key);
+    };
+  });
+  await page.getByRole('button', { name: 'Retake first image' }).click();
+  await expect(page.getByText(/Browser storage could not remove the old local upload/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Retry reset' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Capture the first image' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Capture the first image' }).click();
+  await expect(page.getByText('FIRST CAPTURE SAVED')).toBeVisible();
+});
 
 test('replay preserves the first capture through rejection, recovery, and complete publication', async ({ page }) => {
   await mockService(page);
@@ -68,7 +138,7 @@ test('replay preserves the first capture through rejection, recovery, and comple
   await page.getByRole('button', { name: 'Reconnect & check recovery' }).click();
   await expect(page.getByRole('button', { name: 'Check current scene' })).toBeVisible();
   await page.getByRole('button', { name: 'Check current scene' }).click();
-  await page.getByRole('button', { name: 'Capture the counterpart' }).click();
+  await page.getByRole('button', { name: 'Capture the second image' }).click();
   await page.getByRole('button', { name: 'Save the complete pair' }).click();
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download complete pair' }).click();
@@ -168,7 +238,7 @@ test('phone layout fits the viewport and preserves the main action', async ({ pa
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   await page.getByRole('button', { name: 'Open replay session' }).click();
   await page.getByRole('button', { name: 'Capture the first image' }).click();
-  await expect(page.getByRole('button', { name: 'Capture the counterpart' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Capture the second image' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   await page.screenshot({ path: 'test-results/mobile-collector.png', fullPage: true });
 });

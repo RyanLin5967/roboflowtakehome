@@ -11,10 +11,12 @@ async function cameraFixture(page: Page, facing: 'user' | 'environment' | 'unspe
       const canvas = document.createElement('canvas');
       canvas.width = 320; canvas.height = 180;
       const context = canvas.getContext('2d')!;
+      let swapped = false;
       const paint = () => {
-        context.fillStyle = '#ff0000'; context.fillRect(0, 0, 160, 180);
-        context.fillStyle = '#0000ff'; context.fillRect(160, 0, 160, 180);
+        context.fillStyle = swapped ? '#0000ff' : '#ff0000'; context.fillRect(0, 0, 160, 180);
+        context.fillStyle = swapped ? '#ff0000' : '#0000ff'; context.fillRect(160, 0, 160, 180);
       };
+      window.addEventListener('test-camera-scene-change', () => { swapped = true; paint(); });
       paint();
       const stream = canvas.captureStream(30);
       const track = stream.getVideoTracks()[0];
@@ -133,11 +135,73 @@ test('mirrored pending uploads retry exactly the same bytes after reload', async
 test('every temporal frame uses the preview orientation and cannot flip mid-recording', async ({ page }) => {
   const service = await serviceFixture(page); await cameraFixture(page, 'user'); await start(page, true);
   await page.getByRole('button', { name: 'Record first sequence' }).click();
+  await expect(page.getByLabel('Capture countdown')).toContainText('2');
+  await expect(page.locator('.recording-chip')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Stop & check sequence' })).toBeVisible();
   await expect(page.getByRole('checkbox', { name: 'Mirror camera' })).toBeDisabled();
   await expect.poll(async () => Number((await page.locator('.recording-chip').innerText()).match(/\d+/)?.[0]), { timeout: 8000 }).toBeGreaterThanOrEqual(9);
   await page.getByRole('button', { name: 'Stop & check sequence' }).click();
   await expect.poll(() => service.uploads.length).toBe(1); expect(service.uploads[0].length).toBeGreaterThanOrEqual(8);
   for (const bytes of service.uploads[0]) await expectPixels(page, bytes, true);
+});
+
+test('Space counts down before photographing the current scene and works for both pair members', async ({ page }) => {
+  const service = await serviceFixture(page); await cameraFixture(page, 'user'); await start(page);
+  await page.locator('body').click({ position: { x: 1, y: 1 } });
+  const started = Date.now();
+  await page.keyboard.press('Space');
+  await expect(page.getByLabel('Capture countdown')).toContainText('2');
+  expect(service.uploads).toHaveLength(0);
+  await expect(page.getByLabel('Capture countdown')).toContainText('1');
+  expect(service.uploads).toHaveLength(0);
+  await page.evaluate(() => window.dispatchEvent(new Event('test-camera-scene-change')));
+  await expect.poll(() => service.uploads.length).toBe(1);
+  expect(Date.now() - started).toBeGreaterThanOrEqual(2000);
+  // Colors changed during the countdown: prove the photo wasn't taken on click.
+  await expectPixels(page, service.uploads[0][0], false);
+  await expect(page.getByRole('button', { name: 'Capture the second image' })).toBeEnabled();
+  await page.keyboard.press('Space');
+  await expect(page.getByLabel('Capture countdown')).toContainText('2');
+  expect(service.uploads).toHaveLength(1);
+  await expect.poll(() => service.uploads.length).toBe(2);
+});
+
+test('cancel or hide the page during countdown without submitting a capture', async ({ page }) => {
+  const service = await serviceFixture(page); await cameraFixture(page, 'user'); await start(page);
+  await page.getByRole('button', { name: 'Capture the first image' }).click();
+  await page.getByRole('button', { name: 'Cancel countdown' }).click();
+  await expect(page.getByLabel('Capture countdown')).toHaveCount(0);
+  await page.waitForTimeout(2100);
+  expect(service.uploads).toHaveLength(0);
+  await page.getByRole('button', { name: 'Capture the first image' }).click();
+  await expect(page.getByLabel('Capture countdown')).toBeVisible();
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect(page.getByLabel('Capture countdown')).toHaveCount(0);
+  await page.waitForTimeout(2100);
+  expect(service.uploads).toHaveLength(0);
+});
+
+test('Space ignores text entry and key repeat, and stops an active recording', async ({ page }) => {
+  const service = await serviceFixture(page); await cameraFixture(page, 'user'); await start(page, true);
+  await page.evaluate(() => {
+    const input = document.createElement('input'); input.setAttribute('aria-label', 'Test text input'); document.body.append(input); input.focus();
+  });
+  await page.keyboard.press('Space');
+  await expect(page.getByLabel('Test text input')).toHaveValue(' ');
+  await expect(page.getByLabel('Capture countdown')).toHaveCount(0);
+  await page.getByLabel('Test text input').evaluate(input => input.remove());
+  await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', repeat: true, bubbles: true, cancelable: true })));
+  await expect(page.getByLabel('Capture countdown')).toHaveCount(0);
+  await page.keyboard.press('Space');
+  await expect(page.getByLabel('Capture countdown')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Stop & check sequence' })).toBeVisible();
+  await expect.poll(async () => Number((await page.locator('.recording-chip').innerText()).match(/\d+/)?.[0]), { timeout: 8000 }).toBeGreaterThanOrEqual(9);
+  await page.keyboard.press('Space');
+  await expect.poll(() => service.uploads.length).toBe(1);
+  expect(service.uploads[0].length).toBeGreaterThanOrEqual(8);
 });
 
 test('legacy first capture without orientation metadata retains original coordinates', async ({ page }) => {

@@ -120,6 +120,15 @@ p,h1,h2 { margin:0; }
 .camera-orientation input { accent-color:#627555; }
 .camera-orientation>span { flex:1; min-width:180px; color:#737764; }
 .camera-setup-note { font-size:13px; line-height:1.6; color:#737764; margin-top:10px; }
+.capture-countdown { position:absolute; inset:0; z-index:5; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:12px; background:rgba(0,0,0,.15); color:#fff; pointer-events:none; }
+.capture-countdown strong { display:grid; place-items:center; width:112px; height:112px; border-radius:50%; background:rgba(30,35,28,.85); font-size:76px; line-height:1; font-variant-numeric:tabular-nums; }
+.capture-countdown>span { background:rgba(30,35,28,.85); border-radius:4px; padding:6px 12px; font-size:14px; line-height:1.4; }
+.pair-instructions { margin:-8px 0 24px; padding:16px 20px; border:1px solid var(--line); background:#edf0e5; max-width:850px; font-size:14px; line-height:1.6; }
+.pair-instructions strong { font-size:16px; }
+.pair-instructions p { margin-top:5px; }
+.reset-first { margin-top:18px; width:100%; }
+.reset-first button { width:100%; font-size:13px; }
+.reset-first p { margin-top:7px; font-size:12px; line-height:1.5; color:#737764; }
 .instruction-panel { padding:26px 27px; display:flex; flex-direction:column; align-items:flex-start; }
 .instruction-number { font:500 42px 'Manrope',sans-serif; letter-spacing:-2px; margin-bottom:25px; }
 .instruction-number>span { font:11px ui-monospace,monospace; letter-spacing:0; color:#a2a592; }
