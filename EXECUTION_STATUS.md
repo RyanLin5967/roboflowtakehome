@@ -1,3 +1,34 @@
+# Collector flow redesigned around the two required captures — 2026-09-29
+
+The capture screen now shows two illustrated goal cards before opening the camera:
+photo 1 bottle left of the cup, photo 2 bottle right. Saved evidence replaces each
+illustration. One main action opens the camera, captures, or saves the pair. Current
+instructions precede the camera on narrow screens; camera options and detailed
+checks are collapsed. Typography is larger and redundant instruction blocks removed.
+Temporal and custom-role collection use the same progress component.
+
+Retake controls sit with each saved capture. Retaking the first starts the pair over;
+retaking the second preserves the exact first capture, its authority and any unresolved
+recovery requirement. Both invalidate stale work and retain historical evidence.
+Independent review caught a lost second-reset acknowledgement hiding its retry button
+after polling; the control now persists until the original request is acknowledged.
+
+Executed: 64 real PostgreSQL reset/repository/reviewed-baseline regressions passed.
+Browser run passed 47/48; the failure was an obsolete custom-role diagram selector.
+After updating that selector, all three focused checks passed, including the new
+second-reset lost-acknowledgement regression. All 49 current browser cases have passing
+evidence across those runs. TypeScript/Vite, Ruff, diff and changed-file credential
+checks passed. Actual compiled UI/API/PostgreSQL/worker replay passed second retake,
+replacement capture, publication and reload. Desktop and 390px screenshots were
+inspected; no horizontal overflow or browser errors. No model calls, local ML, user
+session resets or changes to verifier thresholds. Physical validation remains open.
+
+Running at http://127.0.0.1:8080 with the rebuilt bundle; API PID 55806 / exec session
+28545. Existing worker remains running. Refresh the page. QA screenshots are ignored
+under artifacts/qa/capture-controls. No remote push.
+
+---
+
 # Countdown, Space capture, and retaking the first image — 2026-09-29
 
 Live photos, recovery photos and sequence starts now show a two-second 2→1

@@ -6,7 +6,7 @@ async function mockService(page: Page, options: { live?: boolean; failFirstUploa
   let counter = 0;
   let uploads = 0;
   const submitted: string[] = [];
-  const resets: Array<{ expected_revision: number; epoch: number; idempotency_key: string }> = [];
+  const resets: Array<{ slot?: 'baseline' | 'counterpart'; expected_revision: number; epoch: number; idempotency_key: string }> = [];
   const session: any = { id: 'session-1234-5678', recipe: 'spatial', mode: 'replay', object_a: 'bottle', object_b: 'cup', revision: 0, epoch: 0, state: 'collecting', recovery_required: false, baseline: null, counterpart: null, latest_capture: null, feedback: null, pair: null, events: [] };
   const makeCapture = (slot: string, accepted: boolean, message: string) => ({ id: `capture-${++counter}`, slot, status: accepted ? 'accepted' : 'rejected', revision: ++session.revision, epoch: session.epoch, created_at: new Date().toISOString(), frames: Array.from({ length: session.recipe === 'temporal' && slot !== 'recovery' ? 12 : 1 }, (_, i) => ({ asset_id: `asset-${i}`, t_ms: i * 250, width: 720, height: 440 })), result: { accepted, code: accepted ? 'accepted' : 'reference_moved', message, checks: [{ name: 'cup_position', passed: accepted, detail: accepted ? 'Reference stays within tolerance.' : 'The cup moved outside its allowed position.' }], evidence: {}, verifier_version: 'fixture-v1' }, error: null });
   await page.route('**/api/**', async route => {
@@ -28,7 +28,14 @@ async function mockService(page: Page, options: { live?: boolean; failFirstUploa
       const body = route.request().postDataJSON();
       const duplicate = resets.some(item => item.idempotency_key === body.idempotency_key);
       resets.push(body);
-      if (!duplicate) Object.assign(session, { baseline: null, counterpart: null, latest_capture: null, feedback: null, baseline_authorization: null, human_review_required: false, state: 'collecting', recovery_required: false, revision: session.revision + 1, epoch: session.epoch + 1 });
+      if (!duplicate) {
+        if (body.slot === 'counterpart') {
+          if (!session.baseline) return json({ detail: { code: 'baseline_required', message: 'Save the first capture before retaking the second.' } }, 409);
+          Object.assign(session, { counterpart: null, latest_capture: session.baseline, feedback: null, state: 'baseline_ready', revision: session.revision + 1, epoch: session.epoch + 1 });
+        } else {
+          Object.assign(session, { baseline: null, counterpart: null, latest_capture: null, feedback: null, baseline_authorization: null, human_review_required: false, state: 'collecting', recovery_required: false, revision: session.revision + 1, epoch: session.epoch + 1 });
+        }
+      }
       if (options.loseResetResponse && resets.length === 1) return route.abort('failed');
       return json(session);
     }
@@ -68,22 +75,74 @@ test('retaking the first image clears the pair and makes the two-photo task expl
   await page.goto('/');
   await expect(page.getByText('Take two photos: bottle left of the cup, then bottle right of the cup. Keep the cup and camera still between photos.')).toBeVisible();
   await page.getByRole('button', { name: 'Open replay session' }).click();
-  await expect(page.getByText('This task needs two photos.')).toBeVisible();
-  await expect(page.getByLabel('Collection progress')).toContainText('Photo 1 · Left');
-  await expect(page.getByLabel('Collection progress')).toContainText('Photo 2 · Right');
+  await expect(page.getByRole('heading', { name: 'Two photos, one change' })).toBeVisible();
+  const progress = page.getByRole('region', { name: 'Your two photos' });
+  await expect(progress.getByRole('article', { name: 'Photo 1 do this first' })).toContainText('Bottle LEFT of cup');
+  await expect(progress.getByRole('article', { name: 'Photo 2 then do this' })).toContainText('Bottle RIGHT of cup');
   await page.getByRole('button', { name: 'Capture the first image' }).click();
   await expect(page.getByRole('button', { name: 'Capture the second image' })).toBeVisible();
   await page.getByRole('button', { name: 'Retake first image' }).click();
-  await expect(page.getByText('FIRST CAPTURE SAVED')).toHaveCount(0);
+  await expect(page.getByRole('article', { name: /^(Photo|Recording) 1 saved$/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Capture the first image' })).toBeEnabled();
   expect(service.resets).toHaveLength(1);
   expect(service.session.baseline).toBeNull();
   expect(service.session.recovery_required).toBe(false);
   await page.reload();
   await expect(page.getByRole('button', { name: 'Capture the first image' })).toBeEnabled();
-  await expect(page.getByText('FIRST CAPTURE SAVED')).toHaveCount(0);
+  await expect(page.getByRole('article', { name: /^(Photo|Recording) 1 saved$/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'Capture the first image' }).click();
   await expect(page.getByRole('button', { name: 'Capture the second image' })).toBeVisible();
+});
+
+test('retaking the second image preserves the first and publishes its replacement', async ({ page }) => {
+  const service = await mockService(page);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Open replay session' }).click();
+  await page.getByRole('button', { name: 'Capture the first image' }).click();
+  await expect(page.getByRole('article', { name: 'Photo 1 saved', exact: true })).toBeVisible();
+  const originalFirst = structuredClone(service.session.baseline);
+  await page.getByRole('button', { name: 'Capture the second image' }).click();
+  await expect(page.getByRole('button', { name: 'Save the complete pair' })).toBeEnabled();
+  const originalSecondId = service.session.counterpart.id;
+  await page.getByRole('button', { name: 'Retake second image' }).click();
+  await expect(page.getByRole('article', { name: 'Photo 1 saved', exact: true })).toBeVisible();
+  await expect(page.getByRole('article', { name: 'Photo 2 do this now' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Capture the second image' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Save the complete pair' })).toHaveCount(0);
+  expect(service.resets).toHaveLength(1);
+  expect(service.resets[0].slot).toBe('counterpart');
+  expect(service.session.baseline).toEqual(originalFirst);
+  expect(service.session.counterpart).toBeNull();
+  expect(service.session.latest_capture).toEqual(originalFirst);
+  await page.getByRole('button', { name: 'Capture the second image' }).click();
+  await expect(page.getByRole('article', { name: 'Photo 2 saved', exact: true })).toBeVisible();
+  expect(service.session.baseline).toEqual(originalFirst);
+  expect(service.session.counterpart.id).not.toBe(originalSecondId);
+  await page.getByRole('button', { name: 'Save the complete pair' }).click();
+  await expect(page.getByRole('button', { name: 'Download complete pair' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: /Retake .* image/ })).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Download complete pair' })).toBeEnabled();
+  expect(service.session.baseline).toEqual(originalFirst);
+});
+
+test('phone capture introduces both photo goals before one obvious camera action', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const service = await mockService(page, { live: true });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Use my camera' }).click();
+  await page.getByRole('button', { name: 'Start a real capture' }).click();
+  const progress = page.getByRole('region', { name: 'Your two photos' });
+  await expect(progress.getByRole('article')).toHaveCount(2);
+  await expect(progress.getByRole('heading', { name: 'Bottle LEFT of cup' })).toBeInViewport();
+  await expect(progress.getByRole('heading', { name: 'Bottle RIGHT of cup' })).toBeInViewport();
+  await expect(page.getByRole('heading', { name: 'Place the bottle to the left of the cup.' })).toBeInViewport();
+  await expect(page.getByRole('button', { name: 'Open camera' })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Open camera' })).toBeInViewport();
+  await expect(page.getByRole('checkbox', { name: 'Mirror camera' })).toBeHidden();
+  await expect(page.getByRole('checkbox', { name: 'Live guidance' })).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  expect(service.submitted).toHaveLength(0);
 });
 
 test('a lost reset acknowledgement blocks new capture until the same reset is reconciled', async ({ page }) => {
@@ -99,6 +158,31 @@ test('a lost reset acknowledgement blocks new capture until the same reset is re
   expect(service.resets).toHaveLength(2);
   expect(service.resets[1]).toEqual(service.resets[0]);
   expect(service.session.epoch).toBe(1);
+});
+
+test('second-image reset can reconcile a lost acknowledgement after polling sees it cleared', async ({ page }) => {
+  const service = await mockService(page, { loseResetResponse: true });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Open replay session' }).click();
+  await page.getByRole('button', { name: 'Capture the first image' }).click();
+  await page.getByRole('button', { name: 'Capture the second image' }).click();
+  await expect(page.getByRole('button', { name: 'Save the complete pair' })).toBeEnabled();
+  const originalFirst = structuredClone(service.session.baseline);
+  await page.getByRole('button', { name: 'Retake second image' }).click();
+  // The reset committed but its response was lost. Wait for a fresh snapshot:
+  // the retry must remain available even though the second image is now absent.
+  await expect(page.getByRole('article', { name: 'Photo 2 do this now' })).toBeVisible();
+  const secondCard = page.getByRole('article', { name: 'Photo 2 do this now' });
+  await expect(secondCard.getByRole('button', { name: 'Retry reset' })).toBeEnabled();
+  await expect(page.locator('.primary-action button')).toBeDisabled();
+  expect(service.session.counterpart).toBeNull();
+  await secondCard.getByRole('button', { name: 'Retry reset' }).click();
+  await expect(page.getByRole('button', { name: 'Capture the second image' })).toBeEnabled();
+  expect(service.resets).toHaveLength(2);
+  expect(service.resets[1]).toEqual(service.resets[0]);
+  expect(service.resets[1].slot).toBe('counterpart');
+  expect(service.session.epoch).toBe(1);
+  expect(service.session.baseline).toEqual(originalFirst);
 });
 
 test('successful reset remains usable when deletion of a stale local upload fails', async ({ page }) => {
@@ -121,7 +205,7 @@ test('successful reset remains usable when deletion of a stale local upload fail
   await expect(page.getByRole('button', { name: 'Retry reset' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Capture the first image' })).toBeEnabled();
   await page.getByRole('button', { name: 'Capture the first image' }).click();
-  await expect(page.getByText('FIRST CAPTURE SAVED')).toBeVisible();
+  await expect(page.getByRole('article', { name: /^(Photo|Recording) 1 saved$/ })).toBeVisible();
 });
 
 test('replay preserves the first capture through rejection, recovery, and complete publication', async ({ page }) => {
@@ -130,10 +214,10 @@ test('replay preserves the first capture through rejection, recovery, and comple
   await page.getByRole('button', { name: 'Open replay session' }).click();
   await expect(page.getByText('SIMULATION · TEST SCENES')).toBeVisible();
   await page.getByRole('button', { name: 'Capture the first image' }).click();
-  await expect(page.getByText('FIRST CAPTURE SAVED')).toBeVisible();
+  await expect(page.getByRole('article', { name: /^(Photo|Recording) 1 saved$/ })).toBeVisible();
   await page.getByRole('button', { name: 'Move the reference' }).click();
   await expect(page.getByText('Keep the first. Fix this one.')).toBeVisible();
-  await expect(page.getByText('FIRST CAPTURE SAVED')).toBeVisible();
+  await expect(page.getByRole('article', { name: /^(Photo|Recording) 1 saved$/ })).toBeVisible();
   await page.getByRole('button', { name: 'Evidence & session history' }).click();
   await page.getByRole('button', { name: 'Reconnect & check recovery' }).click();
   await expect(page.getByRole('button', { name: 'Check current scene' })).toBeVisible();
@@ -186,7 +270,7 @@ test('a person masking the background gets useful capture advice while the origi
   };
   await expect(page.getByText('Keep your body out of the camera view.')).toBeVisible();
   await expect(page.getByText(/A detected person covers most of this image/)).toBeVisible();
-  await expect(page.getByText('FIRST CAPTURE SAVED')).toHaveCount(0);
+  await expect(page.getByRole('article', { name: /^(Photo|Recording) 1 saved$/ })).toHaveCount(0);
   await page.getByText('View all 1 recorded checks').click();
   await expect(page.locator('.check-details').getByText(detail)).toBeVisible();
   await expect(page.locator('.check-details').getByText('Unknown', { exact: true })).toBeVisible();
@@ -210,7 +294,8 @@ test('camera denial is actionable and makes no capture request', async ({ page }
   await page.getByRole('button', { name: 'Start a real capture' }).click();
   await page.getByRole('button', { name: 'Open camera' }).click();
   await expect(page.getByText(/Camera permission was denied/)).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Capture the first image' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Open camera' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Capture the first image' })).toHaveCount(0);
   expect(service.submitted).toHaveLength(0);
 });
 
@@ -224,7 +309,7 @@ test('failed upload preserves pixels and retries the same idempotency identity a
   await expect(page.getByRole('button', { name: 'Retry saved capture' })).toBeVisible();
   await page.reload();
   await page.getByRole('button', { name: 'Retry saved capture' }).click();
-  await expect(page.getByText('FIRST CAPTURE SAVED')).toBeVisible();
+  await expect(page.getByRole('article', { name: /^(Photo|Recording) 1 saved$/ })).toBeVisible();
   expect(service.submitted).toHaveLength(2);
   expect(service.submitted[0]).not.toBe('missing');
   expect(service.submitted[0]).toBe(service.submitted[1]);
@@ -234,7 +319,7 @@ test('phone layout fits the viewport and preserves the main action', async ({ pa
   await page.setViewportSize({ width: 390, height: 844 });
   await mockService(page);
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: /Collect the difference/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Two captures. One change./ })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   await page.getByRole('button', { name: 'Open replay session' }).click();
   await page.getByRole('button', { name: 'Capture the first image' }).click();
@@ -254,7 +339,7 @@ test('native temporal sampling saves ordered frames without invoking a model', a
   await expect(page.getByRole('button', { name: 'Stop & check sequence' })).toBeVisible();
   await expect.poll(async () => Number((await page.locator('.recording-chip').innerText()).match(/\d+/)?.[0]), { timeout: 7000 }).toBeGreaterThanOrEqual(9);
   await page.getByRole('button', { name: 'Stop & check sequence' }).click();
-  await expect(page.getByText('FIRST CAPTURE SAVED')).toBeVisible();
+  await expect(page.getByRole('article', { name: /^(Photo|Recording) 1 saved$/ })).toBeVisible();
   expect(service.submitted).toHaveLength(1);
 });
 
@@ -301,8 +386,9 @@ test('human-adjudicated publication renders immutable pair members even when mac
   await page.addInitScript(() => localStorage.setItem('counterpart.session.v1', JSON.stringify({ id: 'session-1234-5678', token: 'test-capability-not-a-provider-key' })));
   await page.goto('/');
   await expect(page.getByText('Established by human review', { exact: true })).toBeVisible();
-  await expect(page.getByRole('img', { name: 'First saved capture', exact: true })).toBeVisible();
-  await expect(page.getByRole('img', { name: 'Second saved capture', exact: true })).toBeVisible();
+  const evidence = page.getByRole('region', { name: 'Capture workspace' });
+  await expect(evidence.getByRole('img', { name: 'First saved capture', exact: true })).toBeVisible();
+  await expect(evidence.getByRole('img', { name: 'Second saved capture', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Download complete pair' })).toBeEnabled();
   await expect(page.getByText('Observation accepted', { exact: true })).toHaveCount(0);
   expect(service.session.baseline).toBeNull();
@@ -351,6 +437,7 @@ test('outstanding live preview accelerates only snapshot reads, then returns to 
   await page.getByRole('button', { name: 'Use my camera' }).click();
   await page.getByRole('button', { name: 'Start a real capture' }).click();
   await page.getByRole('button', { name: 'Open camera' }).click();
+  await page.getByText('Camera options', { exact: true }).click();
   await expect(page.getByLabel('Live guidance')).toBeEnabled();
   await page.getByLabel('Live guidance').check();
   await expect(page.getByText('Current preview ready.', { exact: true })).toBeVisible({ timeout: 5000 });

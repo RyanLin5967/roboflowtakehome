@@ -21,8 +21,8 @@ api_system = test_api.system
 reviewed_system = test_reviewed_baseline_runtime.system
 
 
-def reset(repo, saved, key=None):
-    return repo.reset_capture(saved["id"], saved["revision"], saved["epoch"], key or uuid4().hex)
+def reset(repo, saved, key=None, slot="baseline"):
+    return repo.reset_capture(saved["id"], saved["revision"], saved["epoch"], key or uuid4().hex, slot)
 
 
 @pytest.mark.parametrize("accept", [True, False])
@@ -217,7 +217,8 @@ def test_reset_http_capability_validation_and_saved_media_retention(api_system):
     assert client.app.state.media.read(asset) == original_bytes
 
 
-def test_reset_http_refuses_published_pair_without_mutating_manifest(api_system):
+@pytest.mark.parametrize("slot", ["baseline", "counterpart"])
+def test_reset_http_refuses_published_pair_without_mutating_manifest(api_system, slot):
     client, repo, worker = api_system
     saved, auth = new_session(client)
     for scenario in ("baseline", "counterpart"):
@@ -230,9 +231,183 @@ def test_reset_http_refuses_published_pair_without_mutating_manifest(api_system)
         f"/api/sessions/{saved['id']}/reset",
         headers=auth,
         json={
-            "expected_revision": saved["revision"], "epoch": saved["epoch"], "idempotency_key": uuid4().hex
+            "expected_revision": saved["revision"], "epoch": saved["epoch"],
+            "idempotency_key": uuid4().hex, "slot": slot,
         },
     )
     assert response.status_code == 409 and response.json()["detail"]["code"] == "already_published"
     assert repo.snapshot(saved["id"]) == before
     assert repo.publish(saved["id"], saved["revision"])["manifest"] == pair["manifest"]
+
+
+def test_retake_second_preserves_baseline_contract_and_old_evidence(repository):
+    collections = CollectionRepository(repository)
+    campaign = collections.create_campaign("Keep first photo", "spatial")
+    group = collections.create_split_group("Same desk after second-photo retake")
+    invitation = collections.create_invite(campaign["id"], max_sessions=1, split_group_id=group["id"])
+    joined = collections.create_session_from_invite(invitation["token"], uuid4().hex)
+    saved = accepted(repository, joined["session"])
+    saved = accepted(repository, saved, "counterpart")
+    saved = accepted(repository, saved, "preview")
+    assert saved["counterpart"] and saved["feedback"]
+
+    fresh = reset(repository, saved, slot="counterpart")
+
+    assert fresh["state"] == "baseline_ready"
+    assert fresh["revision"] == saved["revision"] + 1 and fresh["epoch"] == saved["epoch"] + 1
+    assert fresh["counterpart"] is None and fresh["feedback"] is None
+    assert fresh["latest_capture"] == fresh["baseline"] == saved["baseline"]
+    for field in (
+        "id", "recipe_snapshot", "execution_contract", "campaign_id", "split_group_snapshot",
+        "baseline_authorization", "human_review_required", "recovery_required",
+    ):
+        assert fresh[field] == saved[field]
+    with repository._connection() as connection:
+        assert repository._capture(connection, saved["counterpart"]["id"]) == saved["counterpart"]
+    assert repository.authenticate(fresh["id"], joined["token"])
+    assert collections.get_campaign(campaign["id"])["progress"]["sessions"] == 1
+
+
+@pytest.mark.parametrize("recipe", ["spatial", "temporal"])
+def test_retake_second_http_accepts_next_counterpart_against_same_baseline(api_system, recipe):
+    client, repo, worker = api_system
+    saved, auth = new_session(client, recipe)
+    for scenario in ("baseline", "counterpart"):
+        replay(client, saved, auth, scenario)
+        assert worker.once()
+        saved = repo.snapshot(saved["id"])
+    original_baseline, original_counterpart = saved["baseline"], saved["counterpart"]
+    response = client.post(
+        f"/api/sessions/{saved['id']}/reset", headers=auth,
+        json={
+            "expected_revision": saved["revision"], "epoch": saved["epoch"],
+            "idempotency_key": uuid4().hex, "slot": "counterpart",
+        },
+    )
+    assert response.status_code == 200, response.text
+    fresh = response.json()
+    assert fresh["latest_capture"] == original_baseline
+    replay(client, fresh, auth, "counterpart")
+    assert worker.once()
+    current = repo.snapshot(saved["id"])
+    assert current["state"] == "ready" and current["baseline"] == original_baseline
+    assert current["counterpart"]["id"] != original_counterpart["id"]
+    assert current["counterpart"]["reference_capture_id"] == original_baseline["id"]
+    assert current["counterpart"]["result"]["accepted"]
+    # The ordinary publisher still verifies the replacement revision and pair.
+    assert repo.publish(current["id"], current["revision"])["manifest"]
+
+
+@pytest.mark.parametrize("slot", ["counterpart", "preview", "recovery"])
+def test_retake_second_fences_inflight_work_and_pending_submissions(repository, slot):
+    saved = accepted(repository, session(repository))
+    if slot == "recovery":
+        saved = repository.resume(saved["id"], saved["epoch"])
+    submitted, metadata, frames = submit(repository, saved, slot, seq=1)
+    job = repository.claim("old-worker")
+
+    fresh = reset(repository, submitted["session"], slot="counterpart")
+
+    assert fresh["baseline"] == saved["baseline"]
+    assert fresh["recovery_required"] == saved["recovery_required"]
+    assert not repository.heartbeat(job["id"], job["lease_token"])
+    assert not repository.finish(job["id"], job["lease_token"], verdict(), job["capture"]["frames"])
+    assert not repository.fail(job["id"], job["lease_token"], "provider_unavailable", retryable=True)
+    duplicate = repository.submit(saved["id"], metadata, frames, metadata["idempotency_key"])
+    assert duplicate["capture"]["status"] == "superseded"
+    assert duplicate["session"]["latest_capture"] == saved["baseline"]
+    with pytest.raises(Conflict) as caught:
+        repository.submit(saved["id"], {**metadata, "idempotency_key": uuid4().hex}, frames, "new-upload")
+    assert caught.value.code == "stale_revision"
+    assert repository.claim("replacement-worker") is None
+
+
+def test_retake_second_requires_baseline_and_preserves_unresolved_recovery(repository):
+    saved = session(repository)
+    with pytest.raises(Conflict) as caught:
+        reset(repository, saved, slot="counterpart")
+    assert caught.value.code == "baseline_required"
+    assert repository.snapshot(saved["id"]) == saved
+    saved = accepted(repository, saved)
+    saved = repository.resume(saved["id"], saved["epoch"])
+    fresh = reset(repository, saved, slot="counterpart")
+    assert fresh["recovery_required"]
+    with pytest.raises(Conflict) as caught:
+        submit(repository, fresh, "counterpart")
+    assert caught.value.code == "recovery_required"
+
+
+def test_retake_second_retains_exact_human_baseline_authority(reviewed_system):
+    repo, _, _, _ = reviewed_system
+    saved, original, record = authorized(reviewed_system)
+    saved = repo.resume(saved["id"], saved["epoch"])
+    fresh = reset(repo, saved, slot="counterpart")
+    assert fresh["baseline"] == fresh["latest_capture"] == original
+    assert fresh["baseline_authorization"] == record
+    assert fresh["human_review_required"] and fresh["recovery_required"]
+    submitted, _, _ = submit(repo, fresh, "counterpart")
+    assert submitted["capture"]["reference_capture_id"] == original["id"]
+    assert submitted["capture"]["baseline_authorization"] == record
+    assert submitted["capture"]["recovery_unresolved"]
+
+
+def test_retake_second_duplicate_cannot_erase_new_second_photo_and_slot_mismatch_conflicts(repository):
+    saved = accepted(repository, session(repository))
+    saved = accepted(repository, saved, "counterpart")
+    key = uuid4().hex
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda _: reset(repository, saved, key, "counterpart"), range(8)))
+    assert {row["revision"] for row in results} == {saved["revision"] + 1}
+    current = accepted(repository, results[0], "counterpart")
+    retried = reset(repository, saved, key, "counterpart")
+    assert retried["counterpart"] == current["counterpart"]
+    assert retried["baseline"] == saved["baseline"]
+    assert retried["revision"] == current["revision"]
+    with pytest.raises(Conflict) as caught:
+        reset(repository, saved, key, "baseline")
+    assert caught.value.code == "idempotency_mismatch"
+
+
+def test_retake_second_racing_worker_completion_cannot_restore_old_second_photo(repository):
+    saved = accepted(repository, session(repository))
+    submitted, _, _ = submit(repository, saved, "counterpart")
+    job = repository.claim("finishing-worker")
+    gate = Barrier(2)
+
+    def finish():
+        gate.wait(timeout=5)
+        return repository.finish(job["id"], job["lease_token"], verdict(), job["capture"]["frames"])
+
+    def reset_now():
+        gate.wait(timeout=5)
+        return reset(repository, submitted["session"], slot="counterpart")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        finishing, resetting = pool.submit(finish), pool.submit(reset_now)
+        finishing.result(timeout=10)
+        resetting.result(timeout=10)
+    current = repository.snapshot(saved["id"])
+    assert current["baseline"] == current["latest_capture"] == saved["baseline"]
+    assert current["counterpart"] is None and current["state"] == "baseline_ready"
+    assert current["revision"] == submitted["session"]["revision"] + 1
+    assert repository.claim("replacement-worker") is None
+
+
+def test_legacy_reset_receipt_still_accepts_explicit_baseline_but_not_counterpart(api_system):
+    client, repo, worker = api_system
+    saved, auth = new_session(client)
+    replay(client, saved, auth, "baseline")
+    assert worker.once()
+    saved = repo.snapshot(saved["id"])
+    key = uuid4().hex
+    original = repo.reset_capture(saved["id"], saved["revision"], saved["epoch"], key)
+    receipt = original["events"][-1]["data"]
+    assert receipt["request"] == {"expected_revision": saved["revision"], "epoch": saved["epoch"]}
+    route = f"/api/sessions/{saved['id']}/reset"
+    body = {**receipt["request"], "idempotency_key": key, "slot": "baseline"}
+    response = client.post(route, headers=auth, json=body)
+    assert response.status_code == 200 and response.json() == original
+    response = client.post(route, headers=auth, json={**body, "slot": "counterpart"})
+    assert response.status_code == 409 and response.json()["detail"]["code"] == "idempotency_mismatch"
+    response = client.post(route, headers=auth, json={**body, "slot": "preview"})
+    assert response.status_code == 422

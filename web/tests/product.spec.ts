@@ -153,7 +153,8 @@ test('phone invitation uses fragment capability, supported custom roles, QR and 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'Start collecting' }).click();
   await expect(page.getByRole('heading', { name: 'Place the book to the left of the mouse.' })).toBeVisible();
-  await expect(page.getByRole('img', { name: 'Setup guide for book and mouse' })).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Illustration: book left of mouse. The mouse stays in place.' })).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Illustration: book right of mouse. The mouse stays in place.' })).toBeVisible();
   expect(state.requestedUrls.every(url => !url.includes('collector-fragment-secret'))).toBe(true);
   expect(state.posts.find(post => post.path === '/api/invites/sessions')?.body).toMatchObject({ token: 'collector-fragment-secret' });
   await page.getByRole('link', { name: 'Your sessions' }).click();

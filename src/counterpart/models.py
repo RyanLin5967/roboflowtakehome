@@ -39,6 +39,7 @@ class Resume(StrictModel):
 
 
 class ResetCapture(StrictModel):
+    slot: Literal["baseline", "counterpart"] = "baseline"
     expected_revision: int = Field(ge=0)
     epoch: int = Field(ge=0)
     idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[a-zA-Z0-9_.-]+$")

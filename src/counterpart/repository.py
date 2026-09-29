@@ -526,18 +526,31 @@ class Repository:
             return self._snapshot(connection, session_id)
 
     def reset_capture(
-        self, session_id: str, expected_revision: int, epoch: int, idempotency_key: str
+        self,
+        session_id: str,
+        expected_revision: int,
+        epoch: int,
+        idempotency_key: str,
+        slot: str = "baseline",
     ) -> dict:
-        """Start a fresh pair while retaining its collection contract and old evidence.
+        """Retake either observation, retaining the collection contract and old evidence.
 
         Clearing pointers is deliberately separate from deleting evidence. The
         revision/epoch fence and invalidated leases prevent old worker results or
-        browser uploads from restoring the discarded first observation. A durable
+        browser uploads from restoring discarded observations. Retaking only the
+        counterpart preserves the exact accepted/authorized baseline and does not
+        claim that an unresolved physical-scene interruption has been repaired. A durable
         event receipt makes a lost-response retry harmless even after new captures.
         """
+        if slot not in {"baseline", "counterpart"}:
+            raise Conflict("invalid_slot", "Choose the first or second observation to retake")
         if not re.fullmatch(r"[a-zA-Z0-9_.-]{8,128}", idempotency_key):
             raise Conflict("invalid_reset_key", "Use a new valid reset key")
         request = {"expected_revision": expected_revision, "epoch": epoch}
+        # Deployed first-image reset receipts predate the optional slot. Keep
+        # their exact fingerprint so a lost acknowledgment remains retryable.
+        if slot == "counterpart":
+            request["slot"] = slot
         with self._connection() as connection:
             session = self._session(connection, session_id, lock=True)
             prior = connection.execute(
@@ -560,14 +573,24 @@ class Repository:
                 )
             if epoch != session["epoch"]:
                 raise Conflict("stale_epoch", "This camera session changed. Reload before resetting.")
+            if slot == "counterpart" and session["baseline_id"] is None:
+                raise Conflict("baseline_required", "Save the first observation before retaking the second")
             self._supersede(connection, session_id, ("baseline", "counterpart", "preview", "recovery"))
-            connection.execute(
-                "UPDATE counterpart_sessions SET revision=revision+1,epoch=epoch+1,state='collecting',"
-                "baseline_id=NULL,counterpart_id=NULL,latest_capture_id=NULL,feedback_capture_id=NULL,"
-                "baseline_authorization=NULL,recovery_required=false,feedback_seq=-1,latest_preview_seq=-1 "
-                "WHERE id=%s",
-                (session_id,),
-            )
+            if slot == "counterpart":
+                connection.execute(
+                    "UPDATE counterpart_sessions SET revision=revision+1,epoch=epoch+1,"
+                    "state='baseline_ready',counterpart_id=NULL,latest_capture_id=baseline_id,"
+                    "feedback_capture_id=NULL,feedback_seq=-1,latest_preview_seq=-1 WHERE id=%s",
+                    (session_id,),
+                )
+            else:
+                connection.execute(
+                    "UPDATE counterpart_sessions SET revision=revision+1,epoch=epoch+1,state='collecting',"
+                    "baseline_id=NULL,counterpart_id=NULL,latest_capture_id=NULL,feedback_capture_id=NULL,"
+                    "baseline_authorization=NULL,recovery_required=false,feedback_seq=-1,"
+                    "latest_preview_seq=-1 WHERE id=%s",
+                    (session_id,),
+                )
             self._event(
                 connection,
                 session_id,

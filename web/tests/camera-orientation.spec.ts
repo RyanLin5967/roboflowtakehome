@@ -76,6 +76,7 @@ async function start(page: Page, temporal = false) {
   await page.getByRole('button', { name: 'Use my camera' }).click();
   await page.getByRole('button', { name: 'Start a real capture' }).click();
   await page.getByRole('button', { name: 'Open camera' }).click();
+  await page.getByText('Camera options', { exact: true }).click();
   await expect(page.getByRole('button', { name: temporal ? 'Record first sequence' : 'Capture the first image' })).toBeEnabled();
 }
 
@@ -111,6 +112,7 @@ test('explicit orientation survives reload and is locked after the first saved i
   await page.getByRole('button', { name: 'Capture the first image' }).click();
   await expect.poll(() => service.uploads.length).toBe(1); await expectPixels(page, service.uploads[0][0], false);
   await page.reload(); await page.getByRole('button', { name: 'Open camera' }).click();
+  await page.getByText('Camera options', { exact: true }).click();
   await expect(page.getByRole('checkbox', { name: 'Mirror camera' })).not.toBeChecked();
   await expect(page.getByRole('checkbox', { name: 'Mirror camera' })).toBeDisabled();
   await expectPixels(page, await page.getByLabel('Live camera view').screenshot(), false, 'image/png');
@@ -128,6 +130,7 @@ test('mirrored pending uploads retry exactly the same bytes after reload', async
   expect(service.uploads[1][0].equals(service.uploads[0][0])).toBe(true);
   await expectPixels(page, service.uploads[1][0], true);
   await page.getByRole('button', { name: 'Open camera' }).click();
+  await page.getByText('Camera options', { exact: true }).click();
   await expect(page.getByRole('checkbox', { name: 'Mirror camera' })).toBeChecked();
   await expectPixels(page, await page.getByLabel('Live camera view').screenshot(), true, 'image/png');
 });
@@ -208,6 +211,7 @@ test('legacy first capture without orientation metadata retains original coordin
   await serviceFixture(page, { legacy: true }); await cameraFixture(page, 'user');
   await page.addInitScript(id => localStorage.setItem('counterpart.session.v1', JSON.stringify({ id, token: 'test-only' })), sessionId);
   await page.goto('/'); await page.getByRole('button', { name: 'Open camera' }).click();
+  await page.getByText('Camera options', { exact: true }).click();
   await expect(page.getByRole('checkbox', { name: 'Mirror camera' })).not.toBeChecked();
   await expect(page.getByRole('checkbox', { name: 'Mirror camera' })).toBeDisabled();
   await expectPixels(page, await page.getByLabel('Live camera view').screenshot(), false, 'image/png');
@@ -220,6 +224,7 @@ test('a rejected legacy attempt also locks coordinates because it can be reviewe
   service.session.baseline = null;
   await page.addInitScript(id => localStorage.setItem('counterpart.session.v1', JSON.stringify({ id, token: 'test-only' })), sessionId);
   await page.goto('/'); await page.getByRole('button', { name: 'Open camera' }).click();
+  await page.getByText('Camera options', { exact: true }).click();
   await expect(page.getByRole('checkbox', { name: 'Mirror camera' })).not.toBeChecked();
   await expect(page.getByRole('checkbox', { name: 'Mirror camera' })).toBeDisabled();
   await expectPixels(page, await page.getByLabel('Live camera view').screenshot(), false, 'image/png');
