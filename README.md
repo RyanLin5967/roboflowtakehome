@@ -45,7 +45,7 @@ A phone camera requires HTTPS. The [deployment guide](docs/DEPLOYMENT.md) includ
 ## The complete data path
 
 - Frozen collection recipes and detector configuration; incompatible workers refuse continuation before spending credits. Expiring, revocable invitations enforce quotas and can share a scene group across collections.
-- Durable collector library, original saved evidence, targeted repairs, scene rechecks after reconnect, and retry of saved frames after provider failure.
+- Durable collector library, original saved evidence, targeted repairs, scene rechecks after reconnect, and retry of saved frames after provider failure. After saving, **Add another image set** continues with the same setup without waiting for review; previous sets remain downloadable.
 - Per-frame inference checkpoints, shared dispatch limits, fair scheduling, cost reservations, progress and worker liveness.
 - Append-only re-verification of saved observations. Uncertain attempts can receive explicit human adjudication without rewriting machine refusals; known failed controls remain blocked. A reviewed uncertain first image can authorize further capture, but the resulting pair still requires adjudication and separate release review.
 - Explicit dataset releases with reproducible membership hashes, original media, VQA JSONL, frozen decisions and shared scene-group splits. Related sessions stay together, and identical assets cannot cross release partitions.
@@ -61,6 +61,7 @@ A portable ZIP works without the service or database. [Dataset format and consum
 COUNTERPART_TEST_DSN=postgresql:///counterpart_test uv run pytest -q
 uv run ruff check src tests scripts
 npm --prefix web run build
+cd web && npx playwright install chromium && cd ..
 npm --prefix web test
 ```
 

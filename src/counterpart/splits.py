@@ -59,6 +59,11 @@ def validate_split_group(snapshot: dict, session_id: str) -> dict:
         # The append-only derivation receipt binds this ID to the source session.
         if identifier == session_id or snapshot["name"] is not None:
             raise ValueError("Derived split group must name its distinct original session")
+    elif snapshot["kind"] == "continued_session":
+        # Another image set collected from the same saved collection conservatively
+        # retains its original scene partition rather than leaking across splits.
+        if identifier == session_id or snapshot["name"] is not None:
+            raise ValueError("Continued split group must name its distinct original session")
     elif snapshot["kind"] == "operator_group":
         name = snapshot["name"]
         if not isinstance(name, str) or not name.strip() or name != name.strip() or len(name) > 120:

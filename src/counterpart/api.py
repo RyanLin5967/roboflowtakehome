@@ -19,6 +19,7 @@ from .lifecycle import MaintenanceBusy
 from .models import (
     CaptureMetadata,
     CreateSession,
+    NextImageSet,
     Publish,
     RecheckPair,
     Replay,
@@ -269,6 +270,20 @@ def create_app(config: Settings | None = None, repository: Repository | None = N
         parent_token = request.headers["authorization"].removeprefix("Bearer ")
         token = derived_token(parent_token, session_id, body.idempotency_key)
         return PairRecheck(repo, media).run(session_id, token=token, **body.model_dump())
+
+    @app.post("/api/sessions/{session_id}/next")
+    def next_image_set(session_id: str, body: NextImageSet, session: Session, request: Request):
+        from .next_image_set import NextCollection, continuation_token
+
+        parent_token = request.headers["authorization"].removeprefix("Bearer ")
+        token = continuation_token(parent_token, session_id, body.idempotency_key)
+        return NextCollection(repo).run(
+            session_id,
+            idempotency_key=body.idempotency_key,
+            token=token,
+            execution_contract=build_execution_contract(config, mode=session["mode"]),
+            allow_new_live=live_ready(),
+        )
 
     @app.post("/api/sessions/{session_id}/captures", status_code=202)
     def capture(

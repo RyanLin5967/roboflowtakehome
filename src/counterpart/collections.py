@@ -345,6 +345,25 @@ class CollectionRepository:
             invite_token.encode(), f"counterpart-session:{session_id}".encode(), "sha256"
         ).hexdigest()
 
+    def _assert_invite_admission(self, connection, campaign, invite, *, allow_new_live=True):
+        """Shared checks for joining or continuing an invitation under its quota lock."""
+        if invite["revoked_at"] is not None or not invite["unexpired"]:
+            raise Conflict("invite_inactive", "This invitation has expired or was revoked")
+        if campaign["mode"] == "live" and not allow_new_live:
+            raise Conflict("live_disabled", "Cloud inference is not enabled for new collector sessions")
+        if campaign["execution_contract"] is None:
+            raise Conflict(
+                "execution_contract_migration_required",
+                "This historical collection has no frozen detector contract; create a new collection.",
+            )
+        if not campaign["active"]:
+            raise Conflict("collection_paused", "This collection is paused; saved evidence remains available")
+        if invite["sessions_created"] >= invite["max_sessions"]:
+            raise Conflict("invite_quota_reached", "This invitation has reached its session limit")
+        progress = self._progress(connection, str(campaign["id"]), campaign["target_pairs"])
+        if progress["remaining_pairs"] == 0:
+            raise Conflict("collection_complete", "This collection has reached its reviewed-pair target")
+
     def create_session_from_invite(
         self, token: str, idempotency_key: str, *, allow_new_live: bool = True
     ) -> dict:
@@ -367,22 +386,7 @@ class CollectionRepository:
                     "token": self._session_token(token, session_id),
                     "session": self.repository._snapshot(connection, session_id),
                 }
-            if campaign["mode"] == "live" and not allow_new_live:
-                raise Conflict("live_disabled", "Cloud inference is not enabled for new collector sessions")
-            if campaign["execution_contract"] is None:
-                raise Conflict(
-                    "execution_contract_migration_required",
-                    "This historical collection has no frozen detector contract; create a new collection.",
-                )
-            if not campaign["active"]:
-                raise Conflict(
-                    "collection_paused", "This collection is paused; saved evidence remains available"
-                )
-            if invite["sessions_created"] >= invite["max_sessions"]:
-                raise Conflict("invite_quota_reached", "This invitation has reached its session limit")
-            progress = self._progress(connection, str(campaign["id"]), campaign["target_pairs"])
-            if progress["remaining_pairs"] == 0:
-                raise Conflict("collection_complete", "This collection has reached its reviewed-pair target")
+            self._assert_invite_admission(connection, campaign, invite, allow_new_live=allow_new_live)
             session_id = str(uuid4())
             group = (
                 self._split_group(connection, str(invite["split_group_id"]))

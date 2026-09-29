@@ -73,6 +73,7 @@ export default function App() {
   const [rechecking, setRechecking] = useState(false);
   const [recheckFailed, setRecheckFailed] = useState(false);
   const recheckIntent = useRef<{ sessionId: string; body: { expected_revision: number; epoch: number; idempotency_key: string } } | null>(null);
+  const nextSetIntent = useRef<{ sessionId: string; idempotency_key: string } | null>(null);
   const [feedbackClock, setFeedbackClock] = useState(0);
   const previewTimes = useRef(new Map<string, number>());
   const outstandingPreview = useRef<{ id: string; epoch: number; expiresAt: number } | null>(null);
@@ -252,6 +253,37 @@ export default function App() {
     const next = { id: result.session.id, token: result.token };
     saveConnection(next); await rememberSession(next, result.session).catch(() => undefined); needsResume.current = false; setConnection(next); setSession(result.session); setNetwork('online'); setPending(null); setNotice(null);
   });
+  const addImageSet = () => act(async () => {
+    if (!connection || !session || session.state !== 'published') return;
+    // Keep access to the completed set before switching to an empty one.
+    await rememberSession(connection, session);
+    await ensureHistoryCapacity();
+    const key = `counterpart.next-set.v1.${session.id}`;
+    let intent = nextSetIntent.current?.sessionId === session.id ? nextSetIntent.current : null;
+    if (!intent) {
+      const saved = JSON.parse(localStorage.getItem(key) || 'null');
+      if (saved?.sessionId === session.id && typeof saved.idempotency_key === 'string') intent = saved;
+    }
+    intent ||= { sessionId: session.id, idempotency_key: crypto.randomUUID() };
+    // Persist before requesting: reloads after a lost response recover the same set.
+    localStorage.setItem(key, JSON.stringify(intent));
+    nextSetIntent.current = intent;
+    const result = await request<{ token: string; session: Session }>(`/sessions/${session.id}/next`, connection, {
+      method: 'POST', body: JSON.stringify({ idempotency_key: intent.idempotency_key }),
+    });
+    const next = { id: result.session.id, token: result.token };
+    await rememberSession(next, result.session);
+    inheritCameraOrientation(session.id, next.id);
+    saveConnection(next);
+    camera.stop(); needsResume.current = false; reopenCamera.current = false;
+    outstandingPreview.current = null; previewTimes.current.clear(); seq.current = 0;
+    recheckIntent.current = null; setRecheckFailed(false);
+    setConnection(next); setSession(result.session); setRecipe(result.session.recipe); setMode(result.session.mode);
+    setPending(null); setPendingConflict(null); setResetIntent(null); setGuidance(false);
+    setPreviewCount(0); setShowEvidence(false); setNetwork('online'); setNotice(null);
+    nextSetIntent.current = null;
+    try { localStorage.removeItem(key); } catch { /* A retained receipt safely reopens the same set. */ }
+  });
   const replay = (scenario: Scenario) => act(async () => {
     if (!connection || !session) return;
     const result = await request<{ capture: Capture; session: Session }>(`/sessions/${connection.id}/replay`, connection, { method: 'POST', body: JSON.stringify({ scenario, expected_revision: session.revision, epoch: session.epoch, idempotency_key: crypto.randomUUID() }) });
@@ -403,18 +435,18 @@ export default function App() {
   const previewGuidance = registrationGuidance(liveHint, feedbackCapture, objectA, objectB);
   const contractInstructions = session?.recipe_snapshot?.instructions as Record<string, unknown> | undefined;
   const contractInstruction = contractInstructions?.[recovering ? 'recovery' : second ? 'counterpart' : 'baseline'];
-  const instruction = !session ? '' : complete ? published ? 'Your pair is saved.' : 'Both captures are ready.' : recovering ? 'Match your first capture to continue.' : session.recipe === 'spatial' ? second ? `Move only the ${objectA} to the right of the ${objectB}.` : `Place the ${objectA} to the left of the ${objectB}.` : typeof contractInstruction === 'string' ? contractInstruction : second ? `${humanize(objectB)} first. Pause. Then the ${objectA}.` : `${humanize(objectA)} first. Pause. Then the ${objectB}.`;
-  const supporting = !session ? '' : complete ? published ? 'Download both captures and their recorded checks.' : 'Check the two captures above, then save them together.' : recovering ? `Your first capture is already saved. Restore its camera view and ${objectB} position, or retake it to start from a new setup.` : session.recipe === 'spatial' ? second ? `Leave the ${objectB} and camera exactly where they were. Move the ${objectA} without turning it.` : `Leave a clear gap. Keep the camera and ${objectB} in place for both photos.` : 'Start both objects on the left, one above the other. Move each into the target area, with a pause between arrivals.';
+  const instruction = !session ? '' : complete ? published ? 'Image set saved.' : 'Both captures are ready.' : recovering ? 'Match your first capture to continue.' : session.recipe === 'spatial' ? second ? `Move only the ${objectA} to the right of the ${objectB}.` : `Place the ${objectA} to the left of the ${objectB}.` : typeof contractInstruction === 'string' ? contractInstruction : second ? `${humanize(objectB)} first. Pause. Then the ${objectA}.` : `${humanize(objectA)} first. Pause. Then the ${objectB}.`;
+  const supporting = !session ? '' : complete ? published ? 'Add another set with the same setup. Saved sets stay in Your sessions.' : 'Check the two captures above, then save them together.' : recovering ? `Your first capture is already saved. Restore its camera view and ${objectB} position, or retake it to start from a new setup.` : session.recipe === 'spatial' ? second ? `Leave the ${objectB} and camera exactly where they were. Move the ${objectA} without turning it.` : `Leave a clear gap. Keep the camera and ${objectB} in place for both photos.` : 'Start both objects on the left, one above the other. Move each into the target area, with a pause between arrivals.';
   const unresolved = result?.checks.filter(check => !check.passed) || [];
   const savedRecheckAvailable = recheckEnabled && !complete && session?.mode === 'live' && !session.campaign_id && !humanRequired && !session.baseline_authorization && ['2.0.0', '2.1.0'].some(version => version === session.recipe_snapshot?.recipe_version) && !!session.baseline && latest?.slot === 'counterpart' && latest.status === 'rejected' && result?.outcome === 'unknown' && !result.hard_error && unresolved.length > 0 && unresolved.every(check => check.outcome === 'unknown' && check.code === 'appearance_uncertain' && check.name.startsWith('appearance_continuity:'));
   useEffect(() => {
     if (savedRecheckAvailable && !recheckFailed && !busy && !running && !pending && !resetIntent && pendingLoaded && network === 'online' && !needsResume.current && !camera.recording && recheckIntent.current?.sessionId !== session?.id) void recheckSaved();
   }, [savedRecheckAvailable, recheckFailed, session?.id, session?.revision, session?.epoch, busy, running, pending, resetIntent, pendingLoaded, network, camera.recording]);
   const protectedObjects = Array.isArray(session?.recipe_snapshot?.protected_objects) ? session.recipe_snapshot.protected_objects.filter((item): item is string => typeof item === 'string') : [];
-  const captureLabel = published ? 'Download complete pair' : humanRequired ? 'Capture for human review' : complete ? 'Save the complete pair' : recovering ? 'Check current scene' : session?.recipe === 'temporal' ? second ? 'Record reverse sequence' : 'Record first sequence' : second ? 'Capture the second image' : 'Capture the first image';
+  const captureLabel = published ? 'Add another image set' : humanRequired ? 'Capture for human review' : complete ? 'Save the complete pair' : recovering ? 'Check current scene' : session?.recipe === 'temporal' ? second ? 'Record reverse sequence' : 'Record first sequence' : second ? 'Capture the second image' : 'Capture the first image';
   const primaryLabel = savedRecheckAvailable ? recheckFailed ? 'Retry saved-photo check' : 'Check saved photos' : !replayMode && !complete && camera.status !== 'ready' ? camera.status === 'requesting' ? 'Allow camera access…' : 'Open camera' : captureLabel;
   const onPrimary = () => {
-    if (published && connection) void act(() => download(connection, 'archive'));
+    if (published && connection) void addImageSet();
     else if (complete) void publish();
     else if (savedRecheckAvailable) void recheckSaved();
     else if (replayMode) void replay(recovering ? 'recovery' : second ? 'counterpart' : 'baseline');
@@ -465,9 +497,10 @@ export default function App() {
           {running && <div className="verification-message checking" role="status"><span className="loading-dot"/><div><strong>{latest?.status === 'running' ? 'Checking the saved evidence' : 'Capture saved. Waiting for verification.'}</strong><p>{replayMode ? 'Evaluating the recorded test observations.' : 'Roboflow supplies detections; the recipe checks the relationship.'}</p>{session.progress && <div className="frame-progress"><progress value={session.progress.completed_frames} max={session.progress.total_frames}/><span>{session.progress.completed_frames} / {session.progress.total_frames} frames checked</span></div>}</div></div>}
           {!running && result && !humanAdjudicated && <div className={`verification-message ${result.accepted ? 'accepted' : 'rejected'}`} role="status"><span>{result.accepted ? '✓' : '!'}</span><div><strong>{result.accepted ? humanRequired ? 'Checks passed; human review required' : latest?.slot === 'recovery' ? 'Ready to continue' : latest?.slot === 'baseline' ? 'First capture saved' : 'Both captures checked' : result.outcome === 'unknown' ? repairGuidance?.title || 'This observation needs a closer look.' : second ? 'Keep the first. Fix this one.' : 'This scene needs a small repair.'}</strong><p>{result.accepted && !humanRequired ? complete ? 'Save the pair when you are happy with both captures.' : 'Follow the next setup shown above.' : repairGuidance?.message || result.message}</p></div></div>}
           {!running && latest?.status === 'failed' && <div className="verification-message rejected" role="status"><span>!</span><div><strong>{configurationProblem ? 'Operator action needed' : 'Verification could not finish'}</strong><p>{configurationProblem || latest.error || 'Your saved evidence is retained. Try again after the service recovers.'}</p><button className="secondary" onClick={retryVerification} disabled={busy || recovering || network !== 'online'}>{configurationProblem ? 'Retry after the operator fixes the service' : 'Retry verification of saved images'}</button></div></div>}
-          <div className="primary-action">{camera.countdown !== null ? <button className="primary" onClick={camera.cancelCountdown}>Cancel countdown <span aria-hidden="true">×</span></button> : camera.recording ? <button className="primary recording-button" onClick={camera.stopRecording}>Stop & check sequence <span>■</span></button> : <button className="primary" onClick={onPrimary} disabled={actionDisabled || camera.status === 'requesting'}>{rechecking ? 'Checking saved photos…' : busy ? 'Saving…' : running ? 'Checking…' : primaryLabel}<Arrow/></button>}<p>{published ? 'ZIP includes the manifest and original evidence.' : humanRequired ? 'Saved for operator review. Capturing does not publish a dataset pair.' : replayMode ? 'Simulation only. Nothing is sent to a Roboflow dataset.' : session.recipe === 'temporal' && !complete ? 'Space to start or stop · 2-second countdown · 12 seconds maximum' : 'Press Space or click capture · 2-second countdown.'}</p></div>
+          <div className="primary-action">{camera.countdown !== null ? <button className="primary" onClick={camera.cancelCountdown}>Cancel countdown <span aria-hidden="true">×</span></button> : camera.recording ? <button className="primary recording-button" onClick={camera.stopRecording}>Stop & check sequence <span>■</span></button> : <button className="primary" onClick={onPrimary} disabled={actionDisabled || camera.status === 'requesting'}>{rechecking ? 'Checking saved photos…' : busy ? published ? 'Opening…' : 'Saving…' : running ? 'Checking…' : primaryLabel}<Arrow/></button>}<p>{published ? 'Your saved set stays intact when you start another.' : humanRequired ? 'Saved for operator review. Capturing does not publish a dataset pair.' : replayMode ? 'Simulation only. Nothing is sent to a Roboflow dataset.' : session.recipe === 'temporal' && !complete ? 'Space to start or stop · 2-second countdown · 12 seconds maximum' : 'Press Space or click capture · 2-second countdown.'}</p></div>
           {protectedObjects.length > 0 && !complete && <p className="protected-capture-note">Also keep {protectedObjects.join(", ")} visible and still. The camera and background are part of the recorded controls.</p>}<Checks result={result}/>
-          {humanRequired && !published && <div className="human-provenance"><strong>Collecting for human review</strong><p>The operator authorized this uncertain baseline so you can capture its counterpart. An operator must establish the final pair from both original observations.{session.recovery_required ? ' The scene has not been reverified after reconnection; that uncertainty remains recorded.' : ''}</p></div>}{humanAdjudicated && <div className="human-provenance"><strong>Established by human review</strong><p>The original machine decision remains recorded. This pair was established by a separate human adjudication.</p></div>}{published && session.campaign_id && <div className={`collector-review ${session.review?.status || 'pending'}`} role="status"><strong>{session.review?.status === 'approved' ? 'Approved for this collection' : session.review?.status === 'rejected' ? 'The reviewer rejected this pair' : session.review?.status === 'needs_revision' ? 'The reviewer requested another pair' : 'Saved. Awaiting operator review.'}</strong>{session.review?.reason && <p>{session.review.reason}</p>}{['rejected', 'needs_revision'].includes(session.review?.status || '') && <p>The original evidence is preserved. Use your invitation to collect a new pair, or contact the collection owner.</p>}</div>}
+          {humanRequired && !published && <div className="human-provenance"><strong>Collecting for human review</strong><p>The operator authorized this uncertain baseline so you can capture its counterpart. An operator must establish the final pair from both original observations.{session.recovery_required ? ' The scene has not been reverified after reconnection; that uncertainty remains recorded.' : ''}</p></div>}{humanAdjudicated && <div className="human-provenance"><strong>Established by human review</strong><p>The original machine decision remains recorded. This pair was established by a separate human adjudication.</p></div>}
+          {published && <button className="secondary saved-pair-download" onClick={() => act(() => download(connection, 'archive'))} disabled={busy}>Download complete pair <Arrow/></button>}
           {published && <button className="text-button manifest-link" onClick={() => act(() => download(connection, 'manifest'))}>Download manifest JSON <Arrow/></button>}
         </aside>
       </div>

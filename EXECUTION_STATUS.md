@@ -1,3 +1,36 @@
+# Collect another image set immediately — 2026-09-29
+
+Saving now leads to **Add another image set**, with **Download complete pair**
+retained as a secondary action. The collector no longer sees the post-save
+“Awaiting operator review” banner. This does not rewrite historical review
+records or waive the operator's dataset-release decisions.
+
+POST /api/sessions/{id}/next creates a separate empty session using the same
+recipe, object roles and protected objects. Campaign sessions retain their frozen
+contract and original invitation admission/quota; standalone sessions use the
+current recipe and configured detector. Continued sets conservatively keep their
+scene split group. Completed pair bytes and decisions remain intact. Authenticated
+receipts commit atomically with admission; concurrent retries and reload after a
+lost response return the same session. The browser preserves both capabilities in
+Your sessions before switching and keeps the original set on a failed request.
+
+Executed checks: 16 new real-PostgreSQL/API tests, 87 existing API/collection/recheck
+regressions, and 22 browser capture/continuation tests passed. TypeScript/Vite, Ruff
+and diff checks passed. Actual compiled UI + API/PostgreSQL/worker replay completed
+capture, save, ZIP download, next-set creation and library reload; original set
+remained published, both sets remained accessible, no browser errors or 390px
+overflow. Provider reservation total was unchanged. These use labeled replay or
+protocol fixtures, not new physical camera/model validation. Ignored smoke evidence:
+artifacts/qa/next-image-set. No provider calls, local ML or Modal compute.
+
+API restarted at http://127.0.0.1:8080, PID 60289 / exec session 18013, serving
+index-CNlR1CSR.js. Existing worker remains running (PID 37447); no migration needed.
+User explicitly authorized publication to RyanLin5967/roboflowtakehome. The existing
+public origin is the destination; credentials, runtime databases, private captures,
+local build outputs and QA artifacts remain outside tracked content.
+
+---
+
 # New-capture false rejections corrected with background compositing — 2026-09-29
 
 The previous claim of a repaired live flow was too broad: old saved pairs passed,

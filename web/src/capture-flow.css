@@ -63,6 +63,7 @@
   .capture-flow .instruction-panel > .protected-capture-note,
   .capture-flow .instruction-panel > .human-provenance,
   .capture-flow .instruction-panel > .collector-review,
+  .capture-flow .instruction-panel > .saved-pair-download,
   .capture-flow .instruction-panel > .manifest-link { margin: 12px 18px; width: auto; }
   .capture-flow .main-media { min-height: 0; }
 }
