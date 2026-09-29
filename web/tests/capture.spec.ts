@@ -98,6 +98,40 @@ test('disabled live provider is explicit and cannot start a paid session', async
   await expect(page.getByRole('button', { name: 'Start a real capture' })).toBeDisabled();
 });
 
+test('a person masking the background gets useful capture advice while the original uncertainty is preserved', async ({ page }) => {
+  const { session } = await mockService(page, { live: true });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Use my camera' }).click();
+  await page.getByRole('button', { name: 'Start a real capture' }).click();
+  const detail = 'Background matches cover too little of the image to establish camera stability.';
+  session.latest_capture = {
+    id: 'uncertain-baseline', slot: 'baseline', status: 'rejected', revision: 1, epoch: 0,
+    created_at: new Date().toISOString(), error: null,
+    frames: [{ asset_id: 'observed-frame', width: 1024, height: 576, t_ms: 0,
+      detections: [{ label: 'person', confidence: .91, box: [.06, 0, 1, .99] }] }],
+    result: { accepted: false, outcome: 'unknown', code: 'registration_uncertain', message: detail,
+      checks: [{ name: 'background_registration:0', passed: false, outcome: 'unknown', code: 'registration_uncertain', detail,
+        measurements: { candidate_sha256: 'observed-frame', candidate_support_area: .0077, candidate_support_cells: 2 } }],
+      evidence: {}, verifier_version: 'fixture-v2' },
+  };
+  await expect(page.getByText('Keep your body out of the camera view.')).toBeVisible();
+  await expect(page.getByText(/A detected person covers most of this image/)).toBeVisible();
+  await expect(page.getByText('FIRST CAPTURE SAVED')).toHaveCount(0);
+  await page.getByText('View all 1 recorded checks').click();
+  await expect(page.locator('.check-details').getByText(detail)).toBeVisible();
+  await expect(page.locator('.check-details').getByText('Unknown', { exact: true })).toBeVisible();
+  // Advice must never replace a known failure or rely on detections from a
+  // different temporal frame than the uncertain registration measurement.
+  session.latest_capture.frames[0].asset_id = 'different-frame';
+  await expect(page.getByText('Show more fixed background detail.')).toBeVisible();
+  await expect(page.getByText(/Before saving the first image, we need background details/)).toBeVisible();
+  session.latest_capture.result.outcome = 'fail';
+  session.latest_capture.result.code = 'reference_moved';
+  session.latest_capture.result.message = 'The cup moved. Restore its saved position.';
+  await expect(page.locator('.verification-message').getByText('The cup moved. Restore its saved position.')).toBeVisible();
+  await expect(page.getByText('Show more fixed background detail.')).toHaveCount(0);
+});
+
 test('camera denial is actionable and makes no capture request', async ({ page }) => {
   const service = await mockService(page, { live: true });
   await page.addInitScript(() => { navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('Denied', 'NotAllowedError')); });

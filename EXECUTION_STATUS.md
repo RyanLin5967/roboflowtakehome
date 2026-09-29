@@ -1,3 +1,42 @@
+# Camera orientation and first physical capture feedback — 2026-09-29
+
+The user began the real-camera trial. The first spatial attempts had the bottle on
+the right in the actual saved pixels; subsequent attempts correctly show it on the
+left but remain uncertain under v2 background registration. For the inspected
+left-side attempt, hosted observations include a high-confidence person box over
+about 93% of the frame. The verifier excludes detected-object boxes from background
+matching; its remaining 90 matches occupy only 0.0077 support area / two grid cells.
+This is an observed usability limitation, not a completed positive physical trial.
+No original image, detector result, recipe or threshold was changed.
+
+The frontend now explains background repair using the corresponding saved frame's
+detections. First-image advice can suggest reframing; counterpart/recovery advice
+keeps the saved camera position. Original uncertainty and measurements remain in
+the detailed checks. The setup screen also asks for visible fixed background detail.
+
+New collections mirror front/unspecified webcams in BOTH preview and encoded
+uploads; explicit rear cameras remain unmirrored. A Mirror camera control is
+available before the first capture. Orientation is retained after any durable first
+attempt, including a rejected/failed one that can later be retried or authorized.
+Legacy attempts retain raw orientation. Pending-upload hydration precedes camera
+startup; retry bytes and temporal sample orientation stay consistent. Metadata is
+stored per session in this browser, not a cross-browser camera calibration contract.
+
+All **40 browser tests passed** (1.0 minute), including nine dedicated camera tests
+and the background-advice regression. TypeScript/Vite and diff checks passed. These
+tests inspect generated asymmetric preview pixels and actual multipart JPEGs, not
+model accuracy. Independent review found and resolved failed-attempt orientation
+locking and contradictory counterpart framing advice. No new model calls were
+made by the repair work; the user's captures remain in the existing durable ledger.
+
+App still runs at http://127.0.0.1:8080 ; API PID 25954 / session 63806 and worker
+PID 26433 / session 83880 were verified alive. The new production bundle is served;
+refresh to load it. Existing captures keep their orientation; use New collection
+to choose a different orientation. No remote push. Physical positive spatial and
+temporal validation remain unfinished.
+
+---
+
 # Original-scope software closure completed — 2026-09-27 UTC
 
 All seven audited software gaps are implemented and independently reviewed: frozen model/configuration contracts; append-only saved-evidence comparisons; immutable shared scene groups; measured bounded feedback scheduling; v2 registration/appearance/protected-object clauses; uncertainty review with separate baseline authority and human pair adjudication; Roboflow annotation review and hosted dataset-version receipts. The final comparison diagnostic preserves strict verifier output and exposes uncertain reference checks without inventing acceptance.

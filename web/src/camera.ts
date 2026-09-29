@@ -2,15 +2,36 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type Recording = { blobs: Blob[]; timestamps: number[]; interrupted: boolean; reason?: string };
 export type CameraStatus = 'off' | 'requesting' | 'ready' | 'error';
+type CameraOptions = { sessionId?: string; hasSavedEvidence?: boolean; orientationLocked?: boolean };
 type FrameWaiter = { resolve: (value: Recording) => void; started: number; frames: Blob[]; timestamps: number[]; lastFrame: number; encoding: boolean; stopping: boolean; interrupted: boolean; reason?: string; timer: ReturnType<typeof setTimeout> };
 
-export function useCamera(onDiscontinuity: () => void) {
+const orientationKey = (sessionId: string) => `counterpart.camera-orientation.v1:${sessionId}`;
+function readOrientation(sessionId?: string): boolean | null {
+  if (!sessionId) return null;
+  try {
+    const value = localStorage.getItem(orientationKey(sessionId));
+    return value === 'mirrored' ? true : value === 'original' ? false : null;
+  } catch { return null; }
+}
+function saveOrientation(sessionId: string | undefined, mirrored: boolean): boolean {
+  if (!sessionId) return false;
+  try {
+    const value = mirrored ? 'mirrored' : 'original';
+    localStorage.setItem(orientationKey(sessionId), value);
+    return localStorage.getItem(orientationKey(sessionId)) === value;
+  } catch { return false; }
+}
+
+export function useCamera(onDiscontinuity: () => void, options: CameraOptions = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const stream = useRef<MediaStream | null>(null);
   const callbackRef = useRef<number | null>(null);
   const recorder = useRef<FrameWaiter | null>(null);
   const onDiscontinuityRef = useRef(onDiscontinuity);
   onDiscontinuityRef.current = onDiscontinuity;
+  const optionsRef = useRef(options); optionsRef.current = options;
+  const mirroredRef = useRef(false);
+  const [mirrored, updateMirrored] = useState(false);
   const mounted = useRef(true);
   const [status, setStatus] = useState<CameraStatus>('off');
   const [error, setError] = useState<string | null>(null);
@@ -28,6 +49,9 @@ export function useCamera(onDiscontinuity: () => void) {
     canvas.width = Math.round(video.videoWidth * scale); canvas.height = Math.round(video.videoHeight * scale);
     const context = canvas.getContext('2d');
     if (!context) throw new Error('Image capture is unavailable in this browser.');
+    // Transform the pixels, not just the preview. Detection boxes and target
+    // overlays use these saved-image coordinates for both photos and sequences.
+    if (mirroredRef.current) { context.translate(canvas.width, 0); context.scale(-1, 1); }
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
     return new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('The camera frame could not be encoded.')), 'image/jpeg', 0.88));
   }, []);
@@ -62,9 +86,29 @@ export function useCamera(onDiscontinuity: () => void) {
     if (mounted.current) setStatus('off');
   }, [finish]);
 
+  const setMirrored = useCallback((value: boolean): boolean => {
+    const current = optionsRef.current;
+    if (recorder.current || current.orientationLocked || current.hasSavedEvidence || !stream.current) return false;
+    if (value === mirroredRef.current) return true;
+    if (!saveOrientation(current.sessionId, value)) {
+      setError('This browser could not save the camera orientation. Keep the current view, or enable browser storage before starting a new pair.');
+      return false;
+    }
+    mirroredRef.current = value; updateMirrored(value); setError(null);
+    onDiscontinuityRef.current();
+    return true;
+  }, []);
+
+  useEffect(() => {
+    stop();
+    const saved = readOrientation(options.sessionId) ?? false;
+    mirroredRef.current = saved; updateMirrored(saved);
+  }, [options.sessionId, stop]);
+
   const start = useCallback(async () => {
     stop();
     const requestedGeneration = generation.current;
+    const requestedSession = optionsRef.current.sessionId;
     setError(null);
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
       setStatus('error'); setError('Camera access needs HTTPS or localhost. Open this app at a secure address.'); return;
@@ -82,6 +126,20 @@ export function useCamera(onDiscontinuity: () => void) {
       track.addEventListener('ended', () => { if (stream.current === next) { interrupt('Camera disconnected. Your saved captures are safe.'); setStatus('error'); } });
       track.addEventListener('mute', () => { if (stream.current === next) interrupt('Camera frames were interrupted. Check the scene before continuing.'); });
       const settings = track.getSettings();
+      const current = optionsRef.current;
+      if (current.sessionId !== requestedSession) { stop(); return; }
+      // Existing evidence predates orientation metadata and must retain its
+      // original coordinate system. Unknown-facing laptop webcams behave like
+      // front cameras; an explicit toggle handles unusual external cameras.
+      const saved = readOrientation(current.sessionId);
+      let nextMirrored = saved ?? (!current.hasSavedEvidence && settings.facingMode !== 'environment');
+      if (!saveOrientation(current.sessionId, nextMirrored) && saved === null) {
+        // A choice that cannot survive reload must not create a mirrored first
+        // image that would be reopened later with legacy, original coordinates.
+        nextMirrored = false;
+        setError('Browser storage is unavailable. Using the original camera view so saved captures keep a consistent orientation.');
+      }
+      mirroredRef.current = nextMirrored; updateMirrored(nextMirrored);
       let previousWidth = video.videoWidth, previousHeight = video.videoHeight;
       setDimensions({ width: previousWidth, height: previousHeight });
       video.onresize = () => {
@@ -145,5 +203,5 @@ export function useCamera(onDiscontinuity: () => void) {
     return () => { mounted.current = false; document.removeEventListener('visibilitychange', visibility); stop(); };
   }, [interrupt, stop]);
 
-  return { videoRef, status, error, dimensions, recording, elapsed, frameCount, start, stop, takePhoto, recordSequence, stopRecording: () => finish(false) };
+  return { videoRef, status, error, dimensions, mirrored, setMirrored, recording, elapsed, frameCount, start, stop, takePhoto, recordSequence, stopRecording: () => finish(false) };
 }
