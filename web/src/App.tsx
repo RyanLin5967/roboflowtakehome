@@ -390,7 +390,11 @@ export default function App() {
       outstandingPreview.current = null; previewTimes.current.clear();
       void rememberSession(next, response.session).catch(() => undefined);
       try { localStorage.removeItem(key); } catch { /* A duplicate retained receipt is harmless. */ }
-      setNotice((response.session.state === 'ready' ? 'Your saved photos passed the required checks. Save the pair below.' : 'Your saved photos were rechecked. The remaining issue is shown below.') + storageWarning);
+      setNotice((response.session.state === 'ready'
+        ? 'Your saved photos passed the required checks. Save the pair below.'
+        : response.session.state === 'baseline_ready' && response.session.recovery_required
+          ? 'Your first photo passed the updated checks. Open the camera and check the current scene before taking the second photo.'
+          : 'Your saved photos were rechecked. The remaining issue is shown below.') + storageWarning);
     } catch (cause) {
       setRecheckFailed(true);
       if (cause instanceof ApiError && cause.status < 500 && cause.status !== 429) {
@@ -438,7 +442,18 @@ export default function App() {
   const instruction = !session ? '' : complete ? published ? 'Image set saved.' : 'Both captures are ready.' : recovering ? 'Match your first capture to continue.' : session.recipe === 'spatial' ? second ? `Move only the ${objectA} to the right of the ${objectB}.` : `Place the ${objectA} to the left of the ${objectB}.` : typeof contractInstruction === 'string' ? contractInstruction : second ? `${humanize(objectB)} first. Pause. Then the ${objectA}.` : `${humanize(objectA)} first. Pause. Then the ${objectB}.`;
   const supporting = !session ? '' : complete ? published ? 'Add another set with the same setup. Saved sets stay in Your sessions.' : 'Check the two captures above, then save them together.' : recovering ? `Your first capture is already saved. Restore its camera view and ${objectB} position, or retake it to start from a new setup.` : session.recipe === 'spatial' ? second ? `Leave the ${objectB} and camera exactly where they were. Move the ${objectA} without turning it.` : `Leave a clear gap. Keep the camera and ${objectB} in place for both photos.` : 'Start both objects on the left, one above the other. Move each into the target area, with a pause between arrivals.';
   const unresolved = result?.checks.filter(check => !check.passed) || [];
-  const savedRecheckAvailable = recheckEnabled && !complete && session?.mode === 'live' && !session.campaign_id && !humanRequired && !session.baseline_authorization && ['2.0.0', '2.1.0'].some(version => version === session.recipe_snapshot?.recipe_version) && !!session.baseline && latest?.slot === 'counterpart' && latest.status === 'rejected' && result?.outcome === 'unknown' && !result.hard_error && unresolved.length > 0 && unresolved.every(check => check.outcome === 'unknown' && check.code === 'appearance_uncertain' && check.name.startsWith('appearance_continuity:'));
+  const savedRecheckSource = (!!session?.baseline && latest?.slot === 'counterpart')
+    || (!session?.baseline && latest?.slot === 'baseline');
+  const onlyRecheckableUncertainty = unresolved.length > 0 && unresolved.every(check =>
+    check.outcome === 'unknown' && (
+      (check.code === 'appearance_uncertain' && check.name.startsWith('appearance_continuity:'))
+      || (check.code === 'registration_uncertain' && check.name.startsWith('background_registration:'))
+    ));
+  const savedRecheckAvailable = recheckEnabled && !complete && session?.mode === 'live'
+    && !session.campaign_id && !humanRequired && !session.baseline_authorization
+    && ['2.0.0', '2.1.0', '2.2.0'].some(version => version === session.recipe_snapshot?.recipe_version)
+    && savedRecheckSource && latest?.status === 'rejected' && result?.outcome === 'unknown'
+    && !result.hard_error && onlyRecheckableUncertainty;
   useEffect(() => {
     if (savedRecheckAvailable && !recheckFailed && !busy && !running && !pending && !resetIntent && pendingLoaded && network === 'online' && !needsResume.current && !camera.recording && recheckIntent.current?.sessionId !== session?.id) void recheckSaved();
   }, [savedRecheckAvailable, recheckFailed, session?.id, session?.revision, session?.epoch, busy, running, pending, resetIntent, pendingLoaded, network, camera.recording]);

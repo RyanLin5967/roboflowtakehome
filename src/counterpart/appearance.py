@@ -64,6 +64,16 @@ APPEARANCE_V3_THRESHOLDS = MappingProxyType(
     }
 )
 
+APPEARANCE_V4_VERSION = "counterpart-appearance/4.0.0"
+APPEARANCE_V4_METHOD = (
+    "role-masked exposed-background compositing residual by height band; "
+    "area-weighted silhouette profiles; stationary object-coordinate photometric agreement; "
+    "strict whole/interior coordinate agreement for overlapping temporal movers; reference initialization"
+)
+# Numeric appearance tolerances remain unchanged. V4 retains unrelated furniture
+# for illumination evidence and uses area-preserving silhouette sampling.
+APPEARANCE_V4_THRESHOLDS = MappingProxyType(dict(APPEARANCE_V3_THRESHOLDS))
+
 
 def _rounded(value):
     if isinstance(value, float):
@@ -101,12 +111,23 @@ def compare_appearance(
     transform,
     *,
     version: str = APPEARANCE_VERSION,
+    background_labels: tuple[str, ...] | None = None,
+    allow_partial_overlap: bool = False,
 ) -> dict:
     """Return one required pass/fail/unknown clause from immutable decoded pixels."""
-    if version not in (APPEARANCE_VERSION, APPEARANCE_V3_VERSION):
+    if version not in (APPEARANCE_VERSION, APPEARANCE_V3_VERSION, APPEARANCE_V4_VERSION):
         raise ValueError("Unknown appearance comparison version.")
-    compositing = version == APPEARANCE_V3_VERSION
-    p = APPEARANCE_V3_THRESHOLDS if compositing else APPEARANCE_THRESHOLDS
+    role_masked = version == APPEARANCE_V4_VERSION
+    compositing = version in (APPEARANCE_V3_VERSION, APPEARANCE_V4_VERSION)
+    p = (
+        APPEARANCE_V4_THRESHOLDS
+        if role_masked
+        else APPEARANCE_V3_THRESHOLDS
+        if compositing
+        else APPEARANCE_THRESHOLDS
+    )
+    if role_masked and (not background_labels or label not in background_labels):
+        raise ValueError("Appearance v4 requires the declared object roles.")
     facts = {
         "label": label,
         "appearance_version": version,
@@ -130,10 +151,23 @@ def compare_appearance(
 
     old_box, candidate_box = _box(reference["frame"], label), _box(current["frame"], label)
     if old_box is None or candidate_box is None or transform is None:
-        return result("unknown", f"Keep one clearly visible {label} and a stable, textured background.")
+        return result(
+            "unknown",
+            f"Keep one clearly visible {label} and the same camera view."
+            if role_masked
+            else f"Keep one clearly visible {label} and a stable, textured background.",
+        )
     transform = np.asarray(transform, dtype=float)
     if transform.shape != (3, 3) or not np.isfinite(transform).all():
         return result("unknown", "The saved image registration is unavailable.")
+    if (
+        role_masked
+        and reference["sha256"] == current["sha256"]
+        and np.array_equal(old_box, candidate_box)
+        and np.array_equal(transform, np.eye(3))
+    ):
+        facts["method"] = "reference_initialized"
+        return result("pass", f"The {label}'s original appearance is recorded for the next comparison.")
     old = reference["rgb"].astype(np.float32)
     h, w = old.shape[:2]
     nh, nw = current["rgb"].shape[:2]
@@ -149,6 +183,8 @@ def compare_appearance(
     for image, mapping in ((reference, np.eye(3)), (current, transform)):
         for detection in image["frame"]["detections"]:
             if detection["confidence"] < 0.35:
+                continue
+            if role_masked and detection["label"] not in background_labels:
                 continue
             box = _map_box(np.asarray(detection["box"]), mapping)
             x1, y1, x2, y2 = np.rint(box * [w, h, w, h]).astype(int)
@@ -240,6 +276,17 @@ def compare_appearance(
             ),
         )
     if box_iou > p["maximum_moving_box_iou"]:
+        if role_masked and allow_partial_overlap:
+            from .appearance_overlap import compare_partial_overlap
+
+            matched, overlap_facts = compare_partial_overlap(old, new, boxes, p)
+            facts.update(overlap_facts)
+            return result(
+                "pass" if matched else "unknown",
+                f"The {label}'s whole shape and interior appearance agree during overlapping motion."
+                if matched
+                else f"Keep the {label} unobstructed and facing the same way throughout the recording.",
+            )
         return result(
             "unknown",
             f"Move the {label} clear of its first position so both exposed backgrounds can be compared.",
@@ -316,15 +363,25 @@ def compare_appearance(
             band_foregrounds.append(foreground_means)
             band_backgrounds.append(background_means)
         occupancies.append(occupancy)
-        silhouettes.append(
-            cv2.resize(
-                mask.astype(np.uint8),
-                (p["profile_width"], p["profile_height"]),
-                interpolation=cv2.INTER_NEAREST,
-            ).astype(bool)
+        silhouette = cv2.resize(
+            mask.astype(np.float32) if role_masked else mask.astype(np.uint8),
+            (p["profile_width"], p["profile_height"]),
+            interpolation=cv2.INTER_AREA if role_masked else cv2.INTER_NEAREST,
         )
-    intersection = int((silhouettes[0] & silhouettes[1]).sum())
-    union = int((silhouettes[0] | silhouettes[1]).sum())
+        # Fractional cell coverage preserves silhouette area across resolutions.
+        # Nearest-neighbor sampling can turn a JPEG edge fluctuation into a
+        # different row width just by selecting a different source pixel.
+        silhouettes.append(silhouette if role_masked else silhouette.astype(bool))
+    intersection = (
+        float(np.minimum(silhouettes[0], silhouettes[1]).sum())
+        if role_masked
+        else int((silhouettes[0] & silhouettes[1]).sum())
+    )
+    union = (
+        float(np.maximum(silhouettes[0], silhouettes[1]).sum())
+        if role_masked
+        else int((silhouettes[0] | silhouettes[1]).sum())
+    )
     silhouette_iou = intersection / max(1, union)
     profile = float(np.abs(silhouettes[0].mean(axis=1) - silhouettes[1].mean(axis=1)).mean())
     delta = colors[0] - colors[1]

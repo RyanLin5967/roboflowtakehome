@@ -8,7 +8,7 @@ const oldToken = 'fixture-original-capability';
 const newToken = 'fixture-rechecked-capability';
 const drawing = '<svg xmlns="http://www.w3.org/2000/svg" width="720" height="440"><rect width="720" height="440" fill="#ebe7df"/><rect x="100" y="130" width="80" height="190" fill="#b87d56"/><rect x="350" y="220" width="100" height="100" fill="#738a67"/></svg>';
 
-async function savedPair(page: Page, options: { sourceVersion?: '2.0.0' | '2.1.0' | '2.2.0'; loseFirstResponse?: boolean; campaign?: boolean; human?: boolean; cupFailed?: boolean; registrationUnknown?: boolean; supported?: boolean; orientation?: 'mirrored' | 'original' | 'legacy'; allowCamera?: boolean; blockOrientationWrite?: boolean } = {}) {
+async function savedPair(page: Page, options: { sourceVersion?: '2.0.0' | '2.1.0' | '2.2.0' | '2.3.0'; baselineOnly?: boolean; loseFirstResponse?: boolean; campaign?: boolean; human?: boolean; cupFailed?: boolean; registrationUnknown?: boolean; supported?: boolean; orientation?: 'mirrored' | 'original' | 'legacy'; allowCamera?: boolean; blockOrientationWrite?: boolean } = {}) {
   const appearance = { name: 'appearance_continuity:bottle:0', passed: false, outcome: 'unknown', code: 'appearance_uncertain', detail: "The bottle's appearance comparison is inconclusive.", measurements: { histogram_distance: 0.72 } };
   const baseChecks = [
     { name: 'bottle_right_of_cup', passed: true, outcome: 'pass', code: 'relation_visible', detail: 'The bottle is right of the cup.' },
@@ -25,8 +25,17 @@ async function savedPair(page: Page, options: { sourceVersion?: '2.0.0' | '2.1.0
   const candidate = capture('counterpart');
   const original: any = { id: oldId, recipe: 'spatial', mode: 'live', object_a: 'bottle', object_b: 'cup', revision: 2, epoch: 0, state: 'baseline_ready', recovery_required: false, baseline, counterpart: null, latest_capture: candidate, feedback: null, pair: null, events: [], campaign_id: options.campaign ? 'frozen-campaign' : null, human_review_required: !!options.human, baseline_authorization: options.human ? { id: 'human-authorization' } : null, recipe_snapshot: { recipe_version: options.sourceVersion || '2.0.0', protected_objects: [] } };
   const acceptedAppearance = { name: appearance.name, passed: true, outcome: 'pass', code: 'appearance_consistent', detail: 'The registered object appearance is consistent.' };
-  const acceptedCandidate = { ...candidate, id: 'rechecked-counterpart', status: 'accepted', result: { ...candidate.result, accepted: true, outcome: 'pass', code: 'accepted', message: 'The requested relationship and scene controls pass.', checks: [...baseChecks.slice(0, 3), acceptedAppearance], verifier_version: 'counterpart-verifier/2.2.0' } };
-  const rechecked: any = { ...structuredClone(original), id: newId, revision: 2, epoch: 0, state: 'ready', recovery_required: false, baseline: { ...baseline, id: 'rechecked-baseline' }, counterpart: acceptedCandidate, latest_capture: acceptedCandidate, recipe_snapshot: { recipe_version: '2.2.0', protected_objects: [] } };
+  const acceptedCandidate = { ...candidate, id: 'rechecked-counterpart', status: 'accepted', result: { ...candidate.result, accepted: true, outcome: 'pass', code: 'accepted', message: 'The requested relationship and scene controls pass.', checks: [...baseChecks.slice(0, 3), acceptedAppearance], verifier_version: 'counterpart-verifier/2.3.0' } };
+  const rechecked: any = { ...structuredClone(original), id: newId, revision: 2, epoch: 0, state: 'ready', recovery_required: false, baseline: { ...baseline, id: 'rechecked-baseline' }, counterpart: acceptedCandidate, latest_capture: acceptedCandidate, recipe_snapshot: { recipe_version: '2.3.0', protected_objects: [] } };
+  if (options.baselineOnly) {
+    const rejectedBaseline = { ...structuredClone(baseline), status: 'rejected', result: { ...structuredClone(candidate.result), code: 'registration_uncertain', checks: [
+      { name: 'background_registration:0', outcome: 'unknown', passed: false, code: 'registration_uncertain', detail: 'Background matches cover too little of the image.' },
+      appearance,
+    ] } };
+    Object.assign(original, { baseline: null, counterpart: null, latest_capture: rejectedBaseline, state: 'collecting', revision: 1 });
+    const acceptedBaseline = { ...structuredClone(baseline), id: 'rechecked-baseline', result: { ...baseline.result, verifier_version: 'counterpart-verifier/2.3.0' } };
+    Object.assign(rechecked, { baseline: acceptedBaseline, counterpart: null, latest_capture: acceptedBaseline, state: 'baseline_ready', revision: 1, recovery_required: true });
+  }
   const rechecks: Array<Record<string, unknown>> = [];
   const writes: string[] = [];
   const assets: string[] = [];
@@ -194,9 +203,9 @@ test('blocked orientation storage retains the original connection and safely ret
 });
 
 for (const [label, options] of [
-  ['current verification already applied', { sourceVersion: '2.2.0' }],
+  ['current verification already applied', { sourceVersion: '2.3.0' }],
   ['known cup movement', { cupFailed: true }],
-  ['uncertain camera registration', { registrationUnknown: true }],
+  ['unrecognized registration uncertainty', { registrationUnknown: true }],
   ['a frozen campaign contract', { campaign: true }],
   ['human baseline authorization', { human: true }],
   ['a server without saved-pair recheck support', { supported: false }],
@@ -222,6 +231,36 @@ test('saved 2.1 photos recheck to the new verifier without retaking or losing th
   expect(service.rechecks).toHaveLength(1);
   expect(service.original.recipe_snapshot.recipe_version).toBe('2.1.0');
   expect(service.original.latest_capture.result.accepted).toBe(false);
-  expect(service.rechecked.recipe_snapshot.recipe_version).toBe('2.2.0');
+  expect(service.rechecked.recipe_snapshot.recipe_version).toBe('2.3.0');
   expect(await page.evaluate(() => (window as any).__cameraRequests)).toBe(0);
+});
+
+
+test('plain-background first photo rechecks into its own session and requires a fresh scene check', async ({ page }) => {
+  const service = await savedPair(page, { sourceVersion: '2.2.0', baselineOnly: true, orientation: 'mirrored' });
+  const original = structuredClone(service.original.latest_capture);
+  await page.goto('/');
+  await expect(page.getByText('Your first photo passed the updated checks.', { exact: false })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Match your first capture to continue.' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open camera', exact: true })).toBeEnabled();
+  expect(service.rechecks).toHaveLength(1);
+  expect(service.original.latest_capture).toEqual(original);
+  expect(service.rechecked.baseline.frames).toEqual(original.frames);
+  expect(service.rechecked.recovery_required).toBe(true);
+  expect(await page.evaluate(() => (window as any).__cameraRequests)).toBe(0);
+  expect(await page.evaluate(() => localStorage.getItem('counterpart.camera-orientation.v1:rechecked-appearance-session'))).toBe('mirrored');
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Match your first capture to continue.' })).toBeVisible();
+  expect(service.rechecks).toHaveLength(1);
+});
+
+test('lost first-photo recheck response resumes the same receipt after reload', async ({ page }) => {
+  const service = await savedPair(page, { sourceVersion: '2.2.0', baselineOnly: true, loseFirstResponse: true });
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Retry saved-photo check', exact: true })).toBeEnabled();
+  const request = structuredClone(service.rechecks[0]);
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Match your first capture to continue.' })).toBeVisible();
+  expect(service.rechecks).toHaveLength(2);
+  expect(service.rechecks[1]).toEqual(request);
 });

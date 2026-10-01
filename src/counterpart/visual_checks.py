@@ -22,6 +22,7 @@ from PIL import Image
 VISUAL_VERSION = "counterpart-visual/1.0.0"
 REGISTERED_APPEARANCE_VISUAL_VERSION = "counterpart-visual/2.0.0"
 COMPOSITED_APPEARANCE_VISUAL_VERSION = "counterpart-visual/3.0.0"
+PLAIN_BACKGROUND_VISUAL_VERSION = "counterpart-visual/4.0.0"
 # An immutable contract is copied into recipe v2. A change needs a new version.
 VISUAL_THRESHOLDS = MappingProxyType(
     {
@@ -402,19 +403,24 @@ def evaluate_visual_controls(
     protected_objects: Sequence[str] = (),
     media_reader: Callable[[str], bytes],
     version: str = VISUAL_VERSION,
+    recipe: str = "spatial",
 ) -> dict:
     """Check every sampled frame against the original baseline's first image.
 
-    A new baseline compares each frame with its first frame; that first frame
-    must itself have sufficient distributed background texture. No image gets
-    accepted by trusting a supplied registration or a client-generated hash.
+    Historical versions require distributed texture even for the first frame.
+    Version 4 initializes that reference from verified original bytes and checks
+    later frames with independent original-pixel background consistency, whether
+    or not texture supports a camera transform. No client transform is trusted.
     """
     if version not in (
         VISUAL_VERSION,
         REGISTERED_APPEARANCE_VISUAL_VERSION,
         COMPOSITED_APPEARANCE_VISUAL_VERSION,
+        PLAIN_BACKGROUND_VISUAL_VERSION,
     ):
         raise InvalidVisualEvidence("Unknown visual verification version.")
+    if version == PLAIN_BACKGROUND_VISUAL_VERSION and recipe not in ("spatial", "temporal"):
+        raise InvalidVisualEvidence("Unknown visual recipe family.")
     if not isinstance(frames, list) or not 1 <= len(frames) <= 48:
         raise InvalidVisualEvidence("Visual checks require one to 48 original images.")
     if len(protected_objects) > 3 or len(set(protected_objects)) != len(protected_objects):
@@ -435,18 +441,44 @@ def evaluate_visual_controls(
                 "frame_index": index,
             }
         )
-        registration, transform = _registration(reference, current, index)
+        if version == PLAIN_BACKGROUND_VISUAL_VERSION:
+            from .background import compare_background
+
+            registration, transform = compare_background(
+                reference,
+                current,
+                index,
+                moving_labels=(object_a, object_b) if recipe == "temporal" else (object_a,),
+                controlled_labels=(object_a, object_b, *protected_objects),
+                registration=_registration,
+            )
+        else:
+            registration, transform = _registration(reference, current, index)
         checks.append(registration)
         for label in (object_a, object_b, *protected_objects):
-            if version in (REGISTERED_APPEARANCE_VISUAL_VERSION, COMPOSITED_APPEARANCE_VISUAL_VERSION):
+            if version in (
+                REGISTERED_APPEARANCE_VISUAL_VERSION,
+                COMPOSITED_APPEARANCE_VISUAL_VERSION,
+                PLAIN_BACKGROUND_VISUAL_VERSION,
+            ):
                 from .appearance import APPEARANCE_VERSION, compare_appearance
 
                 appearance_version = APPEARANCE_VERSION
                 corrected_comparison = None
-                if version == COMPOSITED_APPEARANCE_VISUAL_VERSION:
+                if version in (COMPOSITED_APPEARANCE_VISUAL_VERSION, PLAIN_BACKGROUND_VISUAL_VERSION):
                     from .appearance import APPEARANCE_V3_VERSION
 
                     appearance_version = APPEARANCE_V3_VERSION
+                    appearance_options = {}
+                    if version == PLAIN_BACKGROUND_VISUAL_VERSION:
+                        from .appearance import APPEARANCE_V4_VERSION
+
+                        appearance_version = APPEARANCE_V4_VERSION
+                        appearance_options["background_labels"] = (object_a, object_b, *protected_objects)
+                        appearance_options["allow_partial_overlap"] = recipe == "temporal" and label in (
+                            object_a,
+                            object_b,
+                        )
                     corrected_comparison = compare_appearance(
                         reference,
                         current,
@@ -454,6 +486,7 @@ def evaluate_visual_controls(
                         index,
                         transform,
                         version=appearance_version,
+                        **appearance_options,
                     )
                     if corrected_comparison["outcome"] == "pass":
                         # Transparent objects inherit the exposed background's
@@ -495,17 +528,40 @@ def evaluate_visual_controls(
             "limitations": list(VISUAL_LIMITATIONS),
         },
     }
-    if version in (REGISTERED_APPEARANCE_VISUAL_VERSION, COMPOSITED_APPEARANCE_VISUAL_VERSION):
+    if version in (
+        REGISTERED_APPEARANCE_VISUAL_VERSION,
+        COMPOSITED_APPEARANCE_VISUAL_VERSION,
+        PLAIN_BACKGROUND_VISUAL_VERSION,
+    ):
         if version == REGISTERED_APPEARANCE_VISUAL_VERSION:
             from .appearance import APPEARANCE_METHOD, APPEARANCE_THRESHOLDS, APPEARANCE_VERSION
-        else:
+        elif version == COMPOSITED_APPEARANCE_VISUAL_VERSION:
             from .appearance import APPEARANCE_V3_METHOD as APPEARANCE_METHOD
             from .appearance import APPEARANCE_V3_THRESHOLDS as APPEARANCE_THRESHOLDS
             from .appearance import APPEARANCE_V3_VERSION as APPEARANCE_VERSION
+        else:
+            from .appearance import APPEARANCE_V4_METHOD as APPEARANCE_METHOD
+            from .appearance import APPEARANCE_V4_THRESHOLDS as APPEARANCE_THRESHOLDS
+            from .appearance import APPEARANCE_V4_VERSION as APPEARANCE_VERSION
 
         result["evidence"]["appearance"] = {
             "version": APPEARANCE_VERSION,
             "method": APPEARANCE_METHOD,
             "thresholds": dict(APPEARANCE_THRESHOLDS),
         }
+    if version == PLAIN_BACKGROUND_VISUAL_VERSION:
+        from .background import (
+            BACKGROUND_LIMITATIONS,
+            BACKGROUND_METHOD,
+            BACKGROUND_THRESHOLDS,
+            BACKGROUND_VERSION,
+        )
+
+        result["evidence"]["registration_model"] = BACKGROUND_METHOD
+        result["evidence"]["background"] = {
+            "version": BACKGROUND_VERSION,
+            "method": BACKGROUND_METHOD,
+            "thresholds": dict(BACKGROUND_THRESHOLDS),
+        }
+        result["evidence"]["limitations"] = list(BACKGROUND_LIMITATIONS) + list(VISUAL_LIMITATIONS[1:])
     return result

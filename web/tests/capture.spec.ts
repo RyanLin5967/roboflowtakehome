@@ -277,13 +277,22 @@ test('a person masking the background gets useful capture advice while the origi
   // Advice must never replace a known failure or rely on detections from a
   // different temporal frame than the uncertain registration measurement.
   session.latest_capture.frames[0].asset_id = 'different-frame';
-  await expect(page.getByText('Show more fixed background detail.')).toBeVisible();
-  await expect(page.getByText(/Before saving the first image, we need background details/)).toBeVisible();
+  await expect(page.getByText('This saved photo needs an updated check.')).toBeVisible();
+  await expect(page.getByText(/Plain backgrounds do not need added patterns/)).toBeVisible();
+  // Current checks name the actual visibility/lighting issue, never ask the
+  // collector to manufacture a textured background.
+  const currentDetail = 'Leave more background visible around the objects.';
+  session.latest_capture.result.checks[0].detail = currentDetail;
+  session.latest_capture.result.checks[0].measurements = { background_version: 'counterpart-background/1.0.0' };
+  await expect(page.getByText('Keep the scene clearly visible.')).toBeVisible();
+  await expect(page.locator('.verification-message').getByText(currentDetail)).toBeVisible();
+  await expect(page.getByText('Show more fixed background detail.')).toHaveCount(0);
+  await expect(page.getByText(/Include desk edges or patterned paper/)).toHaveCount(0);
   session.latest_capture.result.outcome = 'fail';
   session.latest_capture.result.code = 'reference_moved';
   session.latest_capture.result.message = 'The cup moved. Restore its saved position.';
   await expect(page.locator('.verification-message').getByText('The cup moved. Restore its saved position.')).toBeVisible();
-  await expect(page.getByText('Show more fixed background detail.')).toHaveCount(0);
+  await expect(page.getByText('This saved photo needs an updated check.')).toHaveCount(0);
 });
 
 test('camera denial is actionable and makes no capture request', async ({ page }) => {

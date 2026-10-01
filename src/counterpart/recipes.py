@@ -23,8 +23,8 @@ ObjectClass = Literal["bottle", "cup", "book", "cell phone", "mouse"]
 SUPPORTED_OBJECTS: tuple[ObjectClass, ...] = ("bottle", "cup", "book", "cell phone", "mouse")
 SNAPSHOT_SCHEMA_VERSION = "counterpart.recipe/1"
 CURRENT_RECIPE_VERSION = "1.0.0"
-LIVE_RECIPE_VERSION = "2.2.0"
-VISUAL_RECIPE_VERSIONS = ("2.0.0", "2.1.0", LIVE_RECIPE_VERSION)
+LIVE_RECIPE_VERSION = "2.3.0"
+VISUAL_RECIPE_VERSIONS = ("2.0.0", "2.1.0", "2.2.0", LIVE_RECIPE_VERSION)
 
 
 class RecipeParameters(BaseModel):
@@ -178,6 +178,59 @@ _V22_APPEARANCE_THRESHOLDS = tuple(
     ("minimum_compositing_band_pixels", 8),
     ("minimum_compositing_background_delta", 0.02),
     ("maximum_compositing_residual", 0.06),
+)
+_V23_APPEARANCE_METHOD = (
+    "role-masked exposed-background compositing residual by height band; "
+    "area-weighted silhouette profiles; stationary object-coordinate photometric agreement; "
+    "strict whole/interior coordinate agreement for overlapping temporal movers; reference initialization"
+)
+_V23_BACKGROUND_METHOD = (
+    "permitted-mover ORB masks; independently verified role masks for broad photometric background "
+    "consistency with bounded smooth illumination, contrast-normalized edges, and localized-change "
+    "guards"
+)
+_V23_BACKGROUND_THRESHOLDS = (
+    ("comparison_maximum_side", 320),
+    ("moving_mask_margin", 0.03),
+    ("minimum_detection_confidence", 0.35),
+    ("minimum_control_pixels", 1024),
+    ("minimum_control_fraction", 0.25),
+    ("minimum_control_cells", 6),
+    ("minimum_cell_control_fraction", 0.1),
+    ("comparison_blur_sigma", 0.8),
+    ("maximum_illumination_offset", 32.0),
+    ("local_illumination_sigma_pixels", 6.0),
+    ("maximum_local_illumination_offset", 64.0),
+    ("edge_low_threshold", 20.0),
+    ("edge_high_threshold", 45.0),
+    ("edge_contrast_clip_limit", 2.0),
+    ("edge_contrast_grid_size", 8),
+    ("edge_match_distance_pixels", 3.0),
+    ("minimum_global_edges", 32),
+    ("maximum_unmatched_edge_fraction", 0.12),
+    ("minimum_component_edges", 8),
+    ("component_edge_padding_pixels", 4),
+    ("maximum_component_chromaticity_difference", 0.04),
+    ("chromaticity_pseudocount", 8.0),
+    ("changed_pixel_threshold", 24.0),
+    ("maximum_mean_residual", 6.0),
+    ("maximum_changed_fraction", 0.025),
+    ("maximum_cell_changed_fraction", 0.15),
+    ("maximum_changed_component_fraction", 0.004),
+    ("minimum_changed_component_pixels", 24),
+    ("maximum_direct_translation_pixels", 3),
+    ("direct_translation_inner_pixels", 1),
+    ("component_opening_pixels", 3),
+)
+_V23_BACKGROUND_LIMITATIONS = (
+    "Consistent control-region pixels do not establish camera pose on a textureless scene; physically "
+    "different scenes that produce indistinguishable pixels cannot be distinguished.",
+    "Named object regions are checked separately and excluded from background pixels. Changes hidden "
+    "there, subthreshold changes, and visually equivalent replacements may escape comparison.",
+    "A bounded global color offset accommodates exposure and white-balance drift; a uniform "
+    "scene-color change within that bound is observationally ambiguous with illumination.",
+    "Bounded smooth achromatic illumination changes accommodate cast shadows; equally smooth "
+    "achromatic scene changes cannot always be distinguished from those lighting changes.",
 )
 
 
@@ -376,7 +429,7 @@ def build_recipe_snapshot(
                 ],
             ]
         )
-        if recipe_version in ("2.1.0", "2.2.0"):
+        if recipe_version in ("2.1.0", "2.2.0", "2.3.0"):
             snapshot["verifier"]["visual"]["version"] = "counterpart-visual/2.0.0"
             snapshot["verifier"]["visual"]["appearance"] = {
                 "version": "counterpart-appearance/2.0.0",
@@ -389,7 +442,7 @@ def build_recipe_snapshot(
                 "These measurements do not establish physical identity or unchanged texture. "
                 "Clear raw-pixel appearance changes still fail. Every unknown control blocks acceptance."
             )
-        if recipe_version == "2.2.0":
+        if recipe_version in ("2.2.0", "2.3.0"):
             snapshot["verifier"]["visual"]["version"] = "counterpart-visual/3.0.0"
             snapshot["verifier"]["visual"]["appearance"] = {
                 "version": "counterpart-appearance/3.0.0",
@@ -405,6 +458,40 @@ def build_recipe_snapshot(
                 "object coordinates within the unchanged geometric limits. A passing corrected comparison "
                 "supersedes raw color disagreement from transmitted backgrounds; otherwise substantial "
                 "raw appearance changes still fail. Every unknown control blocks acceptance."
+            )
+        if recipe_version == "2.3.0":
+            snapshot["verifier"]["visual"]["version"] = "counterpart-visual/4.0.0"
+            snapshot["verifier"]["visual"]["background"] = {
+                "version": "counterpart-background/1.0.0",
+                "method": _V23_BACKGROUND_METHOD,
+                "thresholds": dict(_V23_BACKGROUND_THRESHOLDS),
+            }
+            snapshot["verifier"]["visual"]["appearance"] = {
+                "version": "counterpart-appearance/4.0.0",
+                "method": _V23_APPEARANCE_METHOD,
+                "thresholds": dict(_V22_APPEARANCE_THRESHOLDS),
+            }
+            snapshot["controls"].remove(
+                "distributed background features support a stable 2-D camera registration"
+            )
+            snapshot["controls"].append(
+                "visible background agrees within bounded photometric tolerances; "
+                "distributed features additionally bound camera motion when observable"
+            )
+            snapshot["instructions"]["setup"].remove(
+                "Leave a textured background visible across the image for camera registration."
+            )
+            snapshot["instructions"]["setup"].append(
+                "Keep the camera and background unchanged. Plain backgrounds are supported; "
+                "leave background visible around the objects."
+            )
+            snapshot["limitations"].remove(_V2_VISUAL_LIMITATIONS[0])
+            snapshot["limitations"].extend(_V23_BACKGROUND_LIMITATIONS)
+            snapshot["limitations"].append(
+                "The first image initializes the reference; it cannot establish stability across time. "
+                "Pixel agreement on featureless or repeated backgrounds does not establish camera pose, "
+                "physical-object identity, or invisible changes. Unrelated detected furniture remains "
+                "part of the background comparison. Every unknown required control blocks acceptance."
             )
     payload = {key: value for key, value in snapshot.items() if key != "snapshot_sha256"}
     snapshot["snapshot_sha256"] = hashlib.sha256(_canonical(payload).encode("ascii")).hexdigest()
@@ -448,6 +535,7 @@ def assert_runtime_compatible(value: Any) -> None:
     if snapshot["recipe_version"] in VISUAL_RECIPE_VERSIONS:
         from .visual_checks import (
             COMPOSITED_APPEARANCE_VISUAL_VERSION,
+            PLAIN_BACKGROUND_VISUAL_VERSION,
             REGISTERED_APPEARANCE_VISUAL_VERSION,
             VISUAL_THRESHOLDS,
             VISUAL_VERSION,
@@ -457,18 +545,23 @@ def assert_runtime_compatible(value: Any) -> None:
             "2.0.0": VISUAL_VERSION,
             "2.1.0": REGISTERED_APPEARANCE_VISUAL_VERSION,
             "2.2.0": COMPOSITED_APPEARANCE_VISUAL_VERSION,
+            "2.3.0": PLAIN_BACKGROUND_VISUAL_VERSION,
         }[snapshot["recipe_version"]]
         if verifier["visual"]["version"] != visual_version or _canonical(
             verifier["visual"]["thresholds"]
         ) != _canonical(dict(VISUAL_THRESHOLDS)):
             raise RecipeContractError("The running verifier cannot execute this visual policy unchanged.")
-        if snapshot["recipe_version"] in ("2.1.0", "2.2.0"):
+        if snapshot["recipe_version"] in ("2.1.0", "2.2.0", "2.3.0"):
             if snapshot["recipe_version"] == "2.1.0":
                 from .appearance import APPEARANCE_METHOD, APPEARANCE_THRESHOLDS, APPEARANCE_VERSION
-            else:
+            elif snapshot["recipe_version"] == "2.2.0":
                 from .appearance import APPEARANCE_V3_METHOD as APPEARANCE_METHOD
                 from .appearance import APPEARANCE_V3_THRESHOLDS as APPEARANCE_THRESHOLDS
                 from .appearance import APPEARANCE_V3_VERSION as APPEARANCE_VERSION
+            else:
+                from .appearance import APPEARANCE_V4_METHOD as APPEARANCE_METHOD
+                from .appearance import APPEARANCE_V4_THRESHOLDS as APPEARANCE_THRESHOLDS
+                from .appearance import APPEARANCE_V4_VERSION as APPEARANCE_VERSION
 
             appearance = verifier["visual"]["appearance"]
             if (
@@ -478,6 +571,18 @@ def assert_runtime_compatible(value: Any) -> None:
             ):
                 raise RecipeContractError(
                     "The running verifier cannot execute this appearance policy unchanged."
+                )
+        if snapshot["recipe_version"] == "2.3.0":
+            from .background import BACKGROUND_METHOD, BACKGROUND_THRESHOLDS, BACKGROUND_VERSION
+
+            background = verifier["visual"]["background"]
+            if (
+                background["version"] != BACKGROUND_VERSION
+                or background["method"] != BACKGROUND_METHOD
+                or _canonical(background["thresholds"]) != _canonical(dict(BACKGROUND_THRESHOLDS))
+            ):
+                raise RecipeContractError(
+                    "The running verifier cannot execute this background policy unchanged."
                 )
 
 

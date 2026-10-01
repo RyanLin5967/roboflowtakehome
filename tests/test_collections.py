@@ -115,7 +115,7 @@ def review(system, campaign, pair, decision="approved", version=0, key=None):
 def test_campaign_snapshot_is_frozen_and_progress_counts_reviewed_pairs(system):
     repo, collections = system
     campaign = collection(system, target=2)
-    assert campaign["recipe_snapshot"]["recipe_version"] == "2.2.0"
+    assert campaign["recipe_snapshot"]["recipe_version"] == "2.3.0"
     assert campaign["progress"]["remaining_pairs"] == 2
     pair = publish(system, campaign)
     snapshot = repo.snapshot(pair["session_id"])

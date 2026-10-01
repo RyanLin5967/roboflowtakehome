@@ -36,6 +36,9 @@ def saved_pair(
     bottle_color="#1f8040",
     illumination_shift=0,
     recipe_version="2.0.0",
+    initial_only=False,
+    flat=False,
+    wrong_initial_relation=False,
 ):
     client, repo, _ = system
     with repo._connection() as connection:
@@ -50,9 +53,14 @@ def saved_pair(
     session = created["session"]
     media = client.app.state.media
     baseline = None
-    for index, slot in enumerate(("baseline", "counterpart")):
+    for index, slot in enumerate(("baseline",) if initial_only else ("baseline", "counterpart")):
         assets = {}
-        observed = image_frame(assets, right=bool(index), moved_anchor=bool(index) and moved_anchor)
+        observed = image_frame(
+            assets,
+            right=bool(index) or wrong_initial_relation,
+            moved_anchor=bool(index) and moved_anchor,
+            flat=flat,
+        )
         raw = assets[observed["asset_id"]]
         if index and changed_color:
             image = Image.open(BytesIO(raw)).convert("RGB")
@@ -99,7 +107,8 @@ def saved_pair(
         assert repo.finish(job["id"], job["lease_token"], result, [observed])
         session = repo.snapshot(session["id"])
         if index == 0:
-            assert result["accepted"], result
+            if not initial_only:
+                assert result["accepted"], result
             baseline = {**result, "frames": [observed]}
     created["session"] = session
     return created
@@ -124,7 +133,7 @@ def recheck(system, created, body=None):
 
 
 @pytest.mark.parametrize("variation", ["one_level_histogram_boundary", "global_illumination"])
-@pytest.mark.parametrize("source_version", ["2.0.0", "2.1.0"])
+@pytest.mark.parametrize("source_version", ["2.0.0", "2.1.0", "2.2.0"])
 def test_real_saved_pixels_recheck_without_provider_or_rewriting_source(system, variation, source_version):
     client, repo, _ = system
     created = saved_pair(
@@ -144,7 +153,7 @@ def test_real_saved_pixels_recheck_without_provider_or_rewriting_source(system, 
     derived = response.json()
     session = derived["session"]
     assert session["id"] != original["id"] and session["state"] == "ready"
-    assert session["recipe_snapshot"]["recipe_version"] == "2.2.0"
+    assert session["recipe_snapshot"]["recipe_version"] == "2.3.0"
     assert session["execution_contract"] == original["execution_contract"]
     result = session["counterpart"]["result"]
     appearance = [check for check in result["checks"] if check["name"].startswith("appearance_continuity:")]
@@ -165,7 +174,7 @@ def test_real_saved_pixels_recheck_without_provider_or_rewriting_source(system, 
         assert capture["frames"] == source["frames"]
         assert capture["created_at"] == source["created_at"]
         assert capture["retry_of_capture_id"] == source["id"]
-        assert capture["result"]["verifier_version"] == "counterpart-verifier/2.2.0"
+        assert capture["result"]["verifier_version"] == "counterpart-verifier/2.3.0"
         asset = source["frames"][0]["asset_id"]
         image = client.get(
             f"/api/sessions/{session['id']}/assets/{asset}",
@@ -259,8 +268,9 @@ def test_recheck_lost_ack_is_idempotent_even_after_source_reset_and_child_public
     assert changed.status_code == 409 and changed.json()["detail"]["code"] == "idempotency_mismatch"
 
 
+@pytest.mark.parametrize("previous_version", ["2.1.0", "2.2.0"])
 def test_historical_receipt_survives_target_upgrade_and_derived_chain_keeps_original_split(
-    system, monkeypatch
+    system, monkeypatch, previous_version
 ):
     import counterpart.recheck as module
 
@@ -271,17 +281,17 @@ def test_historical_receipt_survives_target_upgrade_and_derived_chain_keeps_orig
     # Exercise a real receipt produced under the previous deployed target,
     # rather than forging a JSON event that merely resembles one.
     with monkeypatch.context() as previous_server:
-        previous_server.setattr(module, "TARGET_VERSION", "2.1.0")
+        previous_server.setattr(module, "TARGET_VERSION", previous_version)
         response = recheck(system, created, body)
     assert response.status_code == 200, response.text
     old_child = response.json()
     old_session = old_child["session"]
-    assert old_session["recipe_snapshot"]["recipe_version"] == "2.1.0"
+    assert old_session["recipe_snapshot"]["recipe_version"] == previous_version
     original_captures = repo.evaluation_snapshot(old_session["id"])["captures"]
     original_receipt = next(
         event for event in repo.snapshot(source["id"])["events"] if event["kind"] == "saved_pair_rechecked"
     )
-    assert original_receipt["data"]["request"]["recipe_version"] == "2.1.0"
+    assert original_receipt["data"]["request"]["recipe_version"] == previous_version
 
     # Same caller request after upgrade recovers its original child and token.
     recovered = recheck(system, created, body)
@@ -298,13 +308,13 @@ def test_historical_receipt_survives_target_upgrade_and_derived_chain_keeps_orig
     changed = recheck(system, created, {**body, "epoch": body["epoch"] + 1})
     assert changed.status_code == 409 and changed.json()["detail"]["code"] == "idempotency_mismatch"
 
-    # A new request to the derived 2.1 collection verifies exact saved evidence
-    # under 2.2, retaining the original scene's split through the entire chain.
+    # A new request to the historical derived collection verifies exact saved evidence
+    # under 2.3, retaining the original scene's split through the entire chain.
     current = recheck(system, old_child)
     assert current.status_code == 200, current.text
     grandchild = current.json()
     session = grandchild["session"]
-    assert session["recipe_snapshot"]["recipe_version"] == "2.2.0" and session["state"] == "ready"
+    assert session["recipe_snapshot"]["recipe_version"] == "2.3.0" and session["state"] == "ready"
     assert session["split_group_snapshot"] == old_session["split_group_snapshot"]
     assert session["split_group_snapshot"]["id"] == source["id"]
     assert manifest_split(session)["split"] == manifest_split(source)["split"]
@@ -312,7 +322,7 @@ def test_historical_receipt_survives_target_upgrade_and_derived_chain_keeps_orig
     for slot in ("baseline", "counterpart"):
         assert session[slot]["frames"] == old_session[slot]["frames"]
         assert session[slot]["retry_of_capture_id"] == old_session[slot]["id"]
-        assert session[slot]["result"]["verifier_version"] == "counterpart-verifier/2.2.0"
+        assert session[slot]["result"]["verifier_version"] == "counterpart-verifier/2.3.0"
     repo.publish(session["id"], session["revision"])
     archive = client.get(
         f"/api/sessions/{session['id']}/archive",
@@ -330,10 +340,103 @@ def test_historical_receipt_survives_target_upgrade_and_derived_chain_keeps_orig
 
 
 def test_current_version_source_cannot_create_another_automatic_clone(system):
-    created = saved_pair(system, recipe_version="2.2.0")
+    created = saved_pair(system, recipe_version="2.3.0")
     response = recheck(system, created)
     assert response.status_code == 409 and response.json()["detail"]["code"] == "recheck_ineligible"
     assert system[1].snapshot(created["session"]["id"]) == created["session"]
+
+
+@pytest.mark.parametrize("source_version", ["2.0.0", "2.1.0", "2.2.0"])
+@pytest.mark.parametrize("flat", [True, False])
+def test_initial_saved_image_recheck_preserves_source_and_requires_physical_recovery(
+    system, source_version, flat
+):
+    client, repo, _ = system
+    created = saved_pair(system, recipe_version=source_version, initial_only=True, flat=flat)
+    original = created["session"]
+    assert original["latest_capture"]["result"]["accepted"] is not flat
+    before = repo.evaluation_snapshot(original["id"])["captures"]
+    body = arguments(created)
+    response = recheck(system, created, body)
+    assert response.status_code == 200, response.text
+    derived = response.json()
+    session = derived["session"]
+    assert session["id"] != original["id"]
+    assert session["state"] == "baseline_ready"
+    assert session["recipe_snapshot"]["recipe_version"] == "2.3.0"
+    assert session["revision"] == 1 and session["recovery_required"] is True
+    assert session["counterpart"] is None
+    baseline = session["baseline"]
+    assert baseline["result"]["accepted"]
+    assert baseline["reference_capture_id"] is None
+    assert baseline["frames"] == original["latest_capture"]["frames"]
+    assert baseline["created_at"] == original["latest_capture"]["created_at"]
+    assert baseline["retry_of_capture_id"] == original["latest_capture"]["id"]
+    assert session["latest_capture"]["id"] == baseline["id"]
+    assert session["execution_contract"] == original["execution_contract"]
+    assert manifest_split(session)["split"] == manifest_split(original)["split"]
+    assert repo.evaluation_snapshot(original["id"])["captures"] == before
+    assert not session["human_review_required"]
+    # Database recovery cannot assert the physical scene still matches these
+    # old pixels. The next committed capture must first check the current scene.
+    with pytest.raises(Conflict) as caught:
+        repo.submit(
+            session["id"],
+            {"slot": "counterpart", "expected_revision": 1, "epoch": 0, "idempotency_key": uuid4().hex},
+            baseline["frames"],
+            uuid4().hex,
+        )
+    assert caught.value.code == "recovery_required"
+    replayed = evaluate(
+        baseline, session["recipe_snapshot"], None, media_reader=client.app.state.media.read
+    )
+    assert canonical(replayed) == canonical(baseline["result"])
+    with repo._connection() as connection:
+        assert connection.execute(
+            "SELECT count(*) AS n FROM counterpart_budget_reservations"
+        ).fetchone()["n"] == 0
+        assert connection.execute(
+            "SELECT count(*) AS n FROM counterpart_jobs WHERE session_id=%s", (session["id"],)
+        ).fetchone()["n"] == 0
+    # Lost ACK recovers its exact child even if the parent is reset meanwhile.
+    repo.reset_capture(original["id"], original["revision"], original["epoch"], uuid4().hex)
+    recovered = recheck(system, created, body)
+    assert recovered.status_code == 200 and recovered.json() == derived
+
+
+def test_initial_recheck_keeps_wrong_relation_failed_even_on_plain_background(system):
+    created = saved_pair(
+        system, recipe_version="2.2.0", initial_only=True, flat=True, wrong_initial_relation=True
+    )
+    response = recheck(system, created)
+    assert response.status_code == 200, response.text
+    session = response.json()["session"]
+    assert session["state"] == "collecting" and session["baseline"] is None
+    assert session["latest_capture"]["result"]["accepted"] is False
+    assert session["latest_capture"]["result"]["outcome"] == "fail"
+    assert any(
+        check.get("code") == "wrong_relation" for check in session["latest_capture"]["result"]["checks"]
+    )
+    with pytest.raises(Conflict):
+        system[1].publish(session["id"], session["revision"])
+
+
+def test_initial_recheck_concurrent_receipts_create_one_child(system):
+    client, repo, _ = system
+    created = saved_pair(system, recipe_version="2.2.0", initial_only=True, flat=True)
+    body = arguments(created)
+    token = derived_token(created["token"], created["session"]["id"], body["idempotency_key"])
+    service = PairRecheck(repo, client.app.state.media)
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        results = list(
+            pool.map(lambda _: service.run(created["session"]["id"], token=token, **body), range(3))
+        )
+    assert len({row["session"]["id"] for row in results}) == 1
+    with repo._connection() as connection:
+        assert connection.execute("SELECT count(*) AS n FROM counterpart_sessions").fetchone()["n"] == 2
+        assert connection.execute(
+            "SELECT count(*) AS n FROM counterpart_events WHERE kind='saved_pair_rechecked'"
+        ).fetchone()["n"] == 1
 
 
 @pytest.mark.parametrize("field,code", [("expected_revision", "stale_revision"), ("epoch", "stale_epoch")])

@@ -25,9 +25,9 @@ from .repository import Conflict, Repository, _json
 from .splits import session_split_group, validate_split_group
 from .verification import verify
 
-TARGET_VERSION = "2.2.0"
-SOURCE_VERSIONS = frozenset({"2.0.0", "2.1.0"})
-RECEIPT_VERSIONS = frozenset({"2.1.0", "2.2.0"})
+TARGET_VERSION = "2.3.0"
+SOURCE_VERSIONS = frozenset({"2.0.0", "2.1.0", "2.2.0"})
+RECEIPT_VERSIONS = frozenset({"2.1.0", "2.2.0", "2.3.0"})
 
 
 def derived_token(parent_token: str, session_id: str, idempotency_key: str) -> str:
@@ -96,11 +96,28 @@ class PairRecheck:
             (session_id,),
         ).fetchone():
             raise Conflict("verification_in_progress", "Wait for the current photo check to finish.")
+        # An old initial observation may have been rejected solely because a
+        # featureless background could not establish camera registration. A
+        # derived current-version session can re-evaluate those exact pixels;
+        # the old result is never waived or rewritten. Accepted initial-only
+        # sessions can also upgrade before collecting their second observation.
+        latest = connection.execute(
+            "SELECT slot FROM counterpart_captures WHERE id=%s AND session_id=%s",
+            (session["latest_capture_id"], session_id),
+        ).fetchone()
+        baseline_only = latest is not None and latest["slot"] == "baseline"
+        if baseline_only and session["counterpart_id"] is not None:
+            raise Conflict("recheck_ineligible", "The saved pair no longer matches its first observation.")
+        selected = (
+            ((session["latest_capture_id"], "baseline"),)
+            if baseline_only
+            else (
+                (session["baseline_id"], "baseline"),
+                (session["latest_capture_id"], "counterpart"),
+            )
+        )
         captures = []
-        for capture_id, slot in (
-            (session["baseline_id"], "baseline"),
-            (session["latest_capture_id"], "counterpart"),
-        ):
+        for capture_id, slot in selected:
             row = connection.execute(
                 "SELECT * FROM counterpart_captures WHERE id=%s AND session_id=%s",
                 (capture_id, session_id),
@@ -117,13 +134,16 @@ class PairRecheck:
                 or row["recovery_unresolved"]
                 or row["error"] is not None
             ):
-                raise Conflict("recheck_ineligible", "Two complete saved observations are required.")
+                raise Conflict("recheck_ineligible", "Complete saved observations are required.")
             if slot == "baseline" and (
-                row["status"] != "accepted"
-                or row["result"].get("accepted") is not True
-                or row["reference_capture_id"] is not None
+                row["reference_capture_id"] is not None
+                or (
+                    not baseline_only
+                    and (row["status"] != "accepted" or row["result"].get("accepted") is not True)
+                )
+                or (baseline_only and row["revision"] != session["revision"])
             ):
-                raise Conflict("recheck_ineligible", "The saved first observation must be accepted.")
+                raise Conflict("recheck_ineligible", "The saved first observation must match this session.")
             if slot == "counterpart" and (
                 row["reference_capture_id"] != session["baseline_id"]
                 or row["revision"] != session["revision"]
@@ -218,7 +238,7 @@ class PairRecheck:
                 session_id=child_id,
                 token=token,
             )
-            capture_ids = [str(uuid4()), str(uuid4())]
+            capture_ids = [str(uuid4()) for _ in source["captures"]]
             for index, (capture, result) in enumerate(zip(source["captures"], results, strict=True)):
                 connection.execute(
                     "INSERT INTO counterpart_captures (id,session_id,idempotency_key,fingerprint,"
@@ -244,16 +264,19 @@ class PairRecheck:
                         capture["id"],
                     ),
                 )
-            first_ok, second_ok = (result["accepted"] for result in results)
+            first_ok = results[0]["accepted"]
+            second_ok = len(results) == 2 and results[1]["accepted"]
             state = "ready" if first_ok and second_ok else "baseline_ready" if first_ok else "collecting"
             connection.execute(
-                "UPDATE counterpart_sessions SET revision=2,state=%s,baseline_id=%s,counterpart_id=%s,"
-                "latest_capture_id=%s WHERE id=%s",
+                "UPDATE counterpart_sessions SET revision=%s,state=%s,baseline_id=%s,counterpart_id=%s,"
+                "latest_capture_id=%s,recovery_required=%s WHERE id=%s",
                 (
+                    len(results),
                     state,
                     capture_ids[0] if first_ok else None,
                     capture_ids[1] if first_ok and second_ok else None,
-                    capture_ids[1],
+                    capture_ids[-1],
+                    first_ok and not second_ok,
                     child_id,
                 ),
             )

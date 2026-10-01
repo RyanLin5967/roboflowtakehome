@@ -1,3 +1,73 @@
+# Plain-background collection repaired and running — 2026-10-01
+
+Live recipe/verifier 2.3.0 pins visual/appearance 4.0.0 and background 1.0.0.
+The first image records a reference without demanding four textured image regions.
+Subsequent captures compare visible background pixels, including plain walls/desks.
+Dense comparison masks declared roles/protected objects, which retain independent
+required geometry/appearance clauses; unrelated detected furniture remains evidence.
+Reliable ORB camera-motion failures still block. Bounded exposure/shadow correction,
+structural edges and color checks address ordinary lighting variation; a bounded
+translation search handles small jitter when features cannot establish a transform.
+
+Appearance 4 preserves silhouette area while resampling, fixing JPEG/gamma-induced
+false rejections without changing the existing appearance tolerances. Partial
+intermediate temporal movement now requires agreement of both whole-object and
+interior coordinates; unknowns remain blocking. Historical 1.0–2.2 decisions and
+contracts retain their exact previous semantics.
+
+Standalone 2.0/2.1/2.2 rejected initial photos can automatically recheck into a
+separate 2.3 session using their original bytes and recorded detections. Existing
+pair recheck remains supported. Original history, split lineage, timestamps and
+camera orientation survive; receipts handle concurrency/lost responses. Incomplete
+derived pairs require a fresh physical-scene check. Frozen campaigns and human
+baselines retain their contracts. No new provider call is needed for recheck.
+The obsolete “Show more fixed background detail” / patterned-paper advice has been
+removed from the served UI; genuine uncertainty displays its actual measured cause.
+
+Executed evidence:
+- 14/14 selected physical outcomes match expectations: seven prior valid pairs and
+  two Oct 1 first photos pass; five known invalid/unclear attempts remain blocked.
+- 13/13 altered-original negative controls are blocked; 5/5 benign rendering
+  variants pass, including JPEG, noise, exposure and gamma. The two actual Oct 1
+  baseline views also pass a same-scene recovery comparison.
+- 75/75 saved historical live decisions reproduce exactly; all 12 previously
+  machine-accepted observations remain accepted under 2.3. No historical human
+  authority records were included in that sweep.
+- Actual compiled UI/API/isolated PostgreSQL smoke on latest rejected baseline
+  62460855 passes automatic recheck, original-byte/history preservation, mirrored
+  orientation, reload and 390px layout; no old texture warning or browser errors.
+  It makes zero camera/provider calls and leaves production data untouched.
+- Full backend run: 1,370 passed with explicit PostgreSQL DSN, no skips. Ruff,
+  TypeScript/Vite and diff checks pass. Browser capture/recheck suite: 35 passed.
+  A broader browser run passed 67/68; its failed camera screenshot sampled the
+  startup placeholder before the first video frame arrived. The test now waits
+  for visible decoded video, with unchanged pixel/byte assertions. The corrected
+  camera suite passes 12/12, including five repeated passes of that failure.
+
+API and worker restarted after confirming no active jobs. Serving
+http://127.0.0.1:8080 with index-D-sgdn7O.js; API PID91986 / exec81467,
+worker PID92156 / exec91505. Health, served bundle and both live recipe versions
+2.3.0 verified. Current ledger139/512 reserved; no new provider/Modal calls or local
+ML compute in this repair. Read-only/replay probes use original saved Roboflow
+observations; do not describe them as new detector evaluations.
+
+Ignored evidence: artifacts/qa/background-repair (selected and75-history reports,
+source hashes, initial failures/residuals, restart receipt), and
+artifacts/qa/background-baseline-browser (actual compiled browser/API probe).
+Reproducible selected probe: scripts/probe_background_repair.py; it fails if any
+expected outcome, historical reproduction, rendering control or recovery mismatches.
+
+Limits: no universal100% physical-camera guarantee. Physically different scenes
+that produce indistinguishable pixels cannot be distinguished; changes hidden by
+objects and indistinguishable smooth lighting changes can escape comparison.
+Detection ambiguity, occlusion, excessive lighting changes or inadequate visible
+background may still require a retake. Oct 1 sources are baseline photos, not a
+newly captured opposite-side pair. There are no saved physical temporal sequences;
+those regression tests use explicitly generated pixels/observations. Repair examples
+are not a held-out collection-accuracy study.
+
+---
+
 # Collect another image set immediately — 2026-09-29
 
 Saving now leads to **Add another image set**, with **Download complete pair**

@@ -1034,7 +1034,7 @@ def verify(
     """Execute the exact registered recipe; v1 semantics remain unchanged.
 
     Visual recipes require server-readable original bytes and passing controls.
-    Versions 2.1 and 2.2 use versioned appearance comparisons. All unknowns
+    Versions 2.1 onward use versioned appearance comparisons. All unknowns
     and known failures block acceptance. Historical decisions stay exact.
     """
     if recipe_snapshot is not None:
@@ -1138,6 +1138,7 @@ def verify(
                     protected_objects=snapshot["protected_objects"],
                     media_reader=media_reader,
                     version=snapshot["verifier"]["visual"]["version"],
+                    recipe=recipe,
                 )
                 result["checks"].extend(visual["checks"])
                 result["evidence"]["visual"] = visual["evidence"]
@@ -1167,7 +1168,7 @@ def verify(
         reason = next(c for c in required_checks if c["outcome"] == result["outcome"])
         result["code"] = reason.get("code", result["code"])
         result["message"] = reason["detail"]
-    if snapshot["recipe_version"] in ("2.1.0", "2.2.0"):
+    if snapshot["recipe_version"] in ("2.1.0", "2.2.0", "2.3.0"):
         # JSONB canonicalizes -0.0 to +0.0. Emit the same finite value so an
         # independent replay has byte-identical canonical JSON after storage.
         # Historical versions keep their original serialized decisions exactly.

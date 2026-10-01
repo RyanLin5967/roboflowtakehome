@@ -92,11 +92,21 @@ async function expectPixels(page: Page, bytes: Buffer, mirrored: boolean, mime =
   expect(colors[1][right]).toBeGreaterThan(240); expect(colors[1][left]).toBeLessThan(15);
 }
 
+async function expectPreview(page: Page, mirrored: boolean) {
+  const video = page.getByLabel('Live camera view');
+  // Stored orientation is available before the reopened camera delivers a
+  // frame. An opacity-zero video still has a screenshot bounding box, so its
+  // screenshot can contain the cream page background until the callback runs.
+  await expect(video).toHaveCSS('opacity', '1');
+  await expect.poll(() => video.evaluate(element => (element as HTMLVideoElement).readyState)).toBeGreaterThanOrEqual(2);
+  await expectPixels(page, await video.screenshot(), mirrored, 'image/png');
+}
+
 for (const facing of ['user', 'unspecified', 'environment'] as const) {
   test(`${facing} camera preview and uploaded JPEG have the same orientation`, async ({ page }) => {
     const service = await serviceFixture(page); await cameraFixture(page, facing); await start(page);
     const mirrored = facing !== 'environment';
-    await expectPixels(page, await page.getByLabel('Live camera view').screenshot(), mirrored, 'image/png');
+    await expectPreview(page, mirrored);
     await page.getByRole('button', { name: 'Capture the first image' }).click();
     await expect.poll(() => service.uploads.length).toBe(1);
     expect(service.uploads[0]).toHaveLength(1); await expectPixels(page, service.uploads[0][0], mirrored);
@@ -108,14 +118,14 @@ for (const facing of ['user', 'unspecified', 'environment'] as const) {
 test('explicit orientation survives reload and is locked after the first saved image', async ({ page }) => {
   const service = await serviceFixture(page); await cameraFixture(page, 'user'); await start(page);
   await page.getByRole('checkbox', { name: 'Mirror camera' }).uncheck();
-  await expectPixels(page, await page.getByLabel('Live camera view').screenshot(), false, 'image/png');
+  await expectPreview(page, false);
   await page.getByRole('button', { name: 'Capture the first image' }).click();
   await expect.poll(() => service.uploads.length).toBe(1); await expectPixels(page, service.uploads[0][0], false);
   await page.reload(); await page.getByRole('button', { name: 'Open camera' }).click();
   await page.getByText('Camera options', { exact: true }).click();
   await expect(page.getByRole('checkbox', { name: 'Mirror camera' })).not.toBeChecked();
   await expect(page.getByRole('checkbox', { name: 'Mirror camera' })).toBeDisabled();
-  await expectPixels(page, await page.getByLabel('Live camera view').screenshot(), false, 'image/png');
+  await expectPreview(page, false);
   await page.getByRole('button', { name: 'Check current scene' }).click();
   await expect.poll(() => service.uploads.length).toBe(2); await expectPixels(page, service.uploads[1][0], false);
 });
@@ -132,7 +142,7 @@ test('mirrored pending uploads retry exactly the same bytes after reload', async
   await page.getByRole('button', { name: 'Open camera' }).click();
   await page.getByText('Camera options', { exact: true }).click();
   await expect(page.getByRole('checkbox', { name: 'Mirror camera' })).toBeChecked();
-  await expectPixels(page, await page.getByLabel('Live camera view').screenshot(), true, 'image/png');
+  await expectPreview(page, true);
 });
 
 test('every temporal frame uses the preview orientation and cannot flip mid-recording', async ({ page }) => {
@@ -214,7 +224,7 @@ test('legacy first capture without orientation metadata retains original coordin
   await page.getByText('Camera options', { exact: true }).click();
   await expect(page.getByRole('checkbox', { name: 'Mirror camera' })).not.toBeChecked();
   await expect(page.getByRole('checkbox', { name: 'Mirror camera' })).toBeDisabled();
-  await expectPixels(page, await page.getByLabel('Live camera view').screenshot(), false, 'image/png');
+  await expectPreview(page, false);
   expect(await page.evaluate(key => localStorage.getItem(key), orientationKey)).toBe('original');
 });
 
@@ -227,7 +237,7 @@ test('a rejected legacy attempt also locks coordinates because it can be reviewe
   await page.getByText('Camera options', { exact: true }).click();
   await expect(page.getByRole('checkbox', { name: 'Mirror camera' })).not.toBeChecked();
   await expect(page.getByRole('checkbox', { name: 'Mirror camera' })).toBeDisabled();
-  await expectPixels(page, await page.getByLabel('Live camera view').screenshot(), false, 'image/png');
+  await expectPreview(page, false);
 });
 
 test('unavailable orientation storage cannot create an unrecoverable mirrored baseline', async ({ page }) => {
