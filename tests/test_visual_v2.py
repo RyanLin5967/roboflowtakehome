@@ -218,7 +218,7 @@ def test_protected_classes_are_canonical_and_historical_replay_cannot_claim_them
         build_recipe_snapshot("spatial", protected_objects=["book"])
     with pytest.raises(ValidationError):
         CreateSession(mode="replay", protected_objects=["book"])
-    assert version_for_mode("live") == "2.3.0"
+    assert version_for_mode("live") == "2.4.0"
     assert version_for_mode("replay") == "1.0.0"
 
 

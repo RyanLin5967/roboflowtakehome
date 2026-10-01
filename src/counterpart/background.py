@@ -66,6 +66,15 @@ BACKGROUND_LIMITATIONS = [
     "Bounded smooth achromatic illumination changes accommodate cast shadows; equally smooth "
     "achromatic scene changes cannot always be distinguished from those lighting changes.",
 ]
+BACKGROUND_V2_VERSION = "counterpart-background/2.0.0"
+BACKGROUND_V2_METHOD = BACKGROUND_METHOD + "; unmatched edges require original-pixel change corroboration"
+BACKGROUND_V2_THRESHOLDS = MappingProxyType(
+    {**BACKGROUND_THRESHOLDS, "minimum_edge_corroboration_difference": 8.0}
+)
+BACKGROUND_V2_LIMITATIONS = list(BACKGROUND_LIMITATIONS) + [
+    "Contrast-amplified weak edges alone do not establish a scene change; edge disagreement "
+    "requires corresponding original-pixel disagreement after bounded illumination correction."
+]
 
 
 def _mask(image: dict, shape: tuple[int, int], moving_labels: Sequence[str]) -> np.ndarray:
@@ -104,17 +113,21 @@ def compare_background(
     moving_labels: Sequence[str],
     registration: Callable,
     controlled_labels: Sequence[str] | None = None,
+    version: str = BACKGROUND_VERSION,
 ) -> tuple[dict, np.ndarray | None]:
     """Measure immutable pixels; never convert registration uncertainty to a pass.
 
     An uncertain transform instead triggers an independent direct consistency test.
     Known excessive camera motion cannot be compensated away by that alternative.
     """
-    p = BACKGROUND_THRESHOLDS
+    if version not in (BACKGROUND_VERSION, BACKGROUND_V2_VERSION):
+        raise ValueError("Unknown background comparison version.")
+    corroborated = version == BACKGROUND_V2_VERSION
+    p = BACKGROUND_V2_THRESHOLDS if corroborated else BACKGROUND_THRESHOLDS
     controlled_labels = moving_labels if controlled_labels is None else controlled_labels
     facts = {
-        "background_version": BACKGROUND_VERSION,
-        "method": BACKGROUND_METHOD,
+        "background_version": version,
+        "method": BACKGROUND_V2_METHOD if corroborated else BACKGROUND_METHOD,
         "reference_sha256": reference["sha256"],
         "candidate_sha256": current["sha256"],
         "masked_moving_labels": list(moving_labels),
@@ -236,6 +249,21 @@ def compare_background(
             count >= p["minimum_global_edges"] and fraction > p["maximum_unmatched_edge_fraction"]
             for count, fraction in zip(edge_counts, edge_fractions, strict=True)
         )
+        if corroborated:
+            # CLAHE deliberately amplifies subtle contrast. Those synthetic
+            # edges may appear/disappear with noise or tiny exposure changes.
+            # A global structural veto needs a co-located change in original
+            # pixels after the same bounded illumination correction used above.
+            original_change = residual >= p["minimum_edge_corroboration_difference"]
+            corroborated_fractions = [
+                int((bad & original_change).sum()) / max(1, count)
+                for bad, count in zip(unmatched, edge_counts, strict=True)
+            ]
+            structure_failed = any(
+                count >= p["minimum_global_edges"] and fraction > p["maximum_unmatched_edge_fraction"]
+                for count, fraction in zip(edge_counts, corroborated_fractions, strict=True)
+            )
+            measurements["corroborated_unmatched_edge_fractions"] = corroborated_fractions
         component_count, component_labels, components, _ = cv2.connectedComponentsWithStats(
             substantial, connectivity=8
         )

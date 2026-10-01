@@ -74,6 +74,23 @@ APPEARANCE_V4_METHOD = (
 # for illumination evidence and uses area-preserving silhouette sampling.
 APPEARANCE_V4_THRESHOLDS = MappingProxyType(dict(APPEARANCE_V3_THRESHOLDS))
 
+APPEARANCE_V5_VERSION = "counterpart-appearance/5.0.0"
+APPEARANCE_V5_METHOD = (
+    APPEARANCE_V4_METHOD
+    + "; background-only bounded smooth scalar illumination correction; reject lost mover surface detail"
+)
+APPEARANCE_V5_THRESHOLDS = MappingProxyType(
+    {
+        **APPEARANCE_V4_THRESHOLDS,
+        "maximum_row_profile_difference": 0.15,
+        "maximum_compositing_residual": 0.08,
+        "maximum_stationary_pixel_difference": 0.08,
+        "spatial_illumination_sigma_pixels": 32.0,
+        "maximum_spatial_illumination_offset": 64.0,
+        "minimum_spatial_illumination_support": 0.001,
+    }
+)
+
 
 def _rounded(value):
     if isinstance(value, float):
@@ -115,12 +132,20 @@ def compare_appearance(
     allow_partial_overlap: bool = False,
 ) -> dict:
     """Return one required pass/fail/unknown clause from immutable decoded pixels."""
-    if version not in (APPEARANCE_VERSION, APPEARANCE_V3_VERSION, APPEARANCE_V4_VERSION):
+    if version not in (
+        APPEARANCE_VERSION,
+        APPEARANCE_V3_VERSION,
+        APPEARANCE_V4_VERSION,
+        APPEARANCE_V5_VERSION,
+    ):
         raise ValueError("Unknown appearance comparison version.")
-    role_masked = version == APPEARANCE_V4_VERSION
-    compositing = version in (APPEARANCE_V3_VERSION, APPEARANCE_V4_VERSION)
+    spatial_illumination = version == APPEARANCE_V5_VERSION
+    role_masked = version in (APPEARANCE_V4_VERSION, APPEARANCE_V5_VERSION)
+    compositing = version in (APPEARANCE_V3_VERSION, APPEARANCE_V4_VERSION, APPEARANCE_V5_VERSION)
     p = (
-        APPEARANCE_V4_THRESHOLDS
+        APPEARANCE_V5_THRESHOLDS
+        if spatial_illumination
+        else APPEARANCE_V4_THRESHOLDS
         if role_masked
         else APPEARANCE_V3_THRESHOLDS
         if compositing
@@ -200,11 +225,43 @@ def compare_appearance(
     if float(np.max(np.abs(offset))) > p["maximum_illumination_offset"]:
         return result("unknown", "The lighting changed too much; restore the original lighting.")
     new -= offset
+    object_photometry = new.copy() if spatial_illumination else None
+    if spatial_illumination:
+        # Moving a real object changes its broad cast shadow. Estimate only a
+        # low-frequency scalar field from untouched background pixels: declared
+        # objects never participate in fitting their own appearance correction.
+        # One value per pixel is shared by RGB, retaining chromatic differences.
+        support = background.astype(np.float32)
+        sigma = p["spatial_illumination_sigma_pixels"]
+        mass = cv2.GaussianBlur(support, (0, 0), sigma)
+        residual_intensity = (new - old).mean(axis=2)
+        field = cv2.GaussianBlur(residual_intensity * support, (0, 0), sigma) / np.maximum(
+            mass, p["minimum_spatial_illumination_support"]
+        )
+        field = np.clip(
+            field, -p["maximum_spatial_illumination_offset"], p["maximum_spatial_illumination_offset"]
+        )
+        facts["spatial_illumination"] = {
+            "method": "background_only_normalized_gaussian_scalar",
+            "sigma_pixels": sigma,
+            "maximum_absolute_correction": float(np.max(np.abs(field))),
+            "minimum_background_support": float(mass.min()),
+            "background_noise_before_correction": float(
+                np.percentile(np.max(np.abs(new - old), axis=2)[background], p["background_noise_percentile"])
+            ),
+        }
+        new -= field[:, :, None]
     difference = np.max(np.abs(new - old), axis=2)
     noise = float(np.percentile(difference[background], p["background_noise_percentile"]))
     facts["background_noise"] = noise
     if noise > p["maximum_background_noise"]:
         return result("unknown", "The background changed too much for an appearance comparison.")
+    if object_photometry is not None:
+        # A moving object's cast shadow belongs to the background surface.
+        # Do not extrapolate that shadow as an object's own lighting change.
+        # Only silhouette/noise evidence uses the corrected background field;
+        # object colors and texture retain the original global correction.
+        new = object_photometry
     new_box = _map_box(candidate_box, transform)
     boxes = [np.rint(box * [w, h, w, h]).astype(int) for box in (old_box, new_box)]
     if any(
@@ -221,6 +278,18 @@ def compare_appearance(
     box_iou = _iou(old_box, new_box)
     center_delta = float(np.linalg.norm((old_box[:2] + old_box[2:] - new_box[:2] - new_box[2:]) / 2))
     facts.update(box_iou=box_iou, registered_center_delta=center_delta)
+    if spatial_illumination and box_iou <= p["maximum_moving_box_iou"]:
+        interior_texture = []
+        for pixels, (x1, y1, x2, y2) in zip((old, new), boxes, strict=True):
+            dx, dy = max(1, (x2 - x1) // 10), max(1, (y2 - y1) // 10)
+            interior = pixels[y1 + dy : y2 - dy, x1 + dx : x2 - dx]
+            gray = cv2.cvtColor(interior, cv2.COLOR_RGB2GRAY)
+            interior_texture.append(float(gray.std() / 255))
+        facts["interior_texture"] = interior_texture
+        if min(interior_texture) < p["minimum_stationary_texture"] <= max(interior_texture):
+            return result(
+                "unknown", f"The {label}'s visible surface detail changed; keep the same object unobstructed."
+            )
     if box_iou >= p["minimum_stationary_box_iou"] and center_delta <= p["maximum_stationary_center_delta"]:
         facts["method"] = "stationary_registered_pixels"
         x1, y1, x2, y2 = boxes[0]

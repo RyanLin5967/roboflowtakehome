@@ -203,6 +203,18 @@ def test_appearance_pass_stays_pass_and_unknown_stays_blocking(monkeypatch, vers
             "34569ed9d723330dafef38d6a10b88ab9df008309aea18ddea8f926c8f6b8684",
             "b8fc2a5332a8b057fc86586e2f526c6e9416927aba0b1def99421373a69c0ac3",
         ),
+        (
+            "spatial",
+            "2.3.0",
+            "78fbe3a7cac06d5b91923523121663d880467eab764dc0aa4075463f5b312e12",
+            "5acd84af56acdb251073a22af5e35af3b4a1cbe387a1900af6fe2c7f89ad9851",
+        ),
+        (
+            "temporal",
+            "2.3.0",
+            "e01c13939de303a03d6b9c88e48a90795253cc9c19db3b416d8a95ab88b3f785",
+            "408d5a0f0110dced3536dcfde630960d740712a0fbc560fff9da2fbe15b3bc20",
+        ),
     ],
 )
 def test_prechange_contract_and_decision_goldens_are_exact(recipe, version, snapshot_digest, decision_digest):
@@ -241,9 +253,9 @@ def test_new_comparison_is_frozen_explicit_and_cannot_be_rehashed_away(recipe_ve
     ).hexdigest()
     with pytest.raises(RecipeContractError):
         validate_recipe_snapshot(changed)
-    assert version_for_mode("live") == "2.3.0"
+    assert version_for_mode("live") == "2.4.0"
     assert version_for_mode("replay") == "1.0.0"
-    assert all(item["recipe_version"] == "2.3.0" for item in recipe_catalogue())
+    assert all(item["recipe_version"] == "2.4.0" for item in recipe_catalogue())
 
 
 @pytest.mark.parametrize("version", ["2.1.0", "2.2.0", "2.3.0"])
@@ -496,3 +508,23 @@ def test_recipe_reaches_visual_controls_so_only_permitted_movers_are_masked(monk
     assert observed[0]["recipe"] == recipe
     assert observed[0]["version"] == "counterpart-visual/4.0.0"
     assert observed[0]["protected_objects"] == ["book"]
+
+
+def test_24_background_contract_pins_corroboration_without_changing_23(monkeypatch):
+    from counterpart import background
+
+    saved = build_recipe_snapshot("spatial", recipe_version="2.4.0")
+    historical = build_recipe_snapshot("spatial", recipe_version="2.3.0")
+    assert_runtime_compatible(saved)
+    assert saved["verifier"]["visual"]["version"] == "counterpart-visual/5.0.0"
+    assert saved["verifier"]["visual"]["appearance"]["version"] == "counterpart-appearance/5.0.0"
+    assert saved["verifier"]["visual"]["background"]["version"] == "counterpart-background/2.0.0"
+    monkeypatch.setattr(
+        background,
+        "BACKGROUND_V2_THRESHOLDS",
+        {**background.BACKGROUND_V2_THRESHOLDS, "minimum_edge_corroboration_difference": 255.0},
+    )
+    assert build_recipe_snapshot("spatial", recipe_version="2.4.0") == saved
+    with pytest.raises(RecipeContractError, match="background policy"):
+        assert_runtime_compatible(saved)
+    assert_runtime_compatible(historical)

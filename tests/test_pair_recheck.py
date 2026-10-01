@@ -133,7 +133,7 @@ def recheck(system, created, body=None):
 
 
 @pytest.mark.parametrize("variation", ["one_level_histogram_boundary", "global_illumination"])
-@pytest.mark.parametrize("source_version", ["2.0.0", "2.1.0", "2.2.0"])
+@pytest.mark.parametrize("source_version", ["2.0.0", "2.1.0", "2.2.0", "2.3.0"])
 def test_real_saved_pixels_recheck_without_provider_or_rewriting_source(system, variation, source_version):
     client, repo, _ = system
     created = saved_pair(
@@ -153,7 +153,7 @@ def test_real_saved_pixels_recheck_without_provider_or_rewriting_source(system, 
     derived = response.json()
     session = derived["session"]
     assert session["id"] != original["id"] and session["state"] == "ready"
-    assert session["recipe_snapshot"]["recipe_version"] == "2.3.0"
+    assert session["recipe_snapshot"]["recipe_version"] == "2.4.0"
     assert session["execution_contract"] == original["execution_contract"]
     result = session["counterpart"]["result"]
     appearance = [check for check in result["checks"] if check["name"].startswith("appearance_continuity:")]
@@ -174,7 +174,7 @@ def test_real_saved_pixels_recheck_without_provider_or_rewriting_source(system, 
         assert capture["frames"] == source["frames"]
         assert capture["created_at"] == source["created_at"]
         assert capture["retry_of_capture_id"] == source["id"]
-        assert capture["result"]["verifier_version"] == "counterpart-verifier/2.3.0"
+        assert capture["result"]["verifier_version"] == "counterpart-verifier/2.4.0"
         asset = source["frames"][0]["asset_id"]
         image = client.get(
             f"/api/sessions/{session['id']}/assets/{asset}",
@@ -268,7 +268,7 @@ def test_recheck_lost_ack_is_idempotent_even_after_source_reset_and_child_public
     assert changed.status_code == 409 and changed.json()["detail"]["code"] == "idempotency_mismatch"
 
 
-@pytest.mark.parametrize("previous_version", ["2.1.0", "2.2.0"])
+@pytest.mark.parametrize("previous_version", ["2.1.0", "2.2.0", "2.3.0"])
 def test_historical_receipt_survives_target_upgrade_and_derived_chain_keeps_original_split(
     system, monkeypatch, previous_version
 ):
@@ -314,7 +314,7 @@ def test_historical_receipt_survives_target_upgrade_and_derived_chain_keeps_orig
     assert current.status_code == 200, current.text
     grandchild = current.json()
     session = grandchild["session"]
-    assert session["recipe_snapshot"]["recipe_version"] == "2.3.0" and session["state"] == "ready"
+    assert session["recipe_snapshot"]["recipe_version"] == "2.4.0" and session["state"] == "ready"
     assert session["split_group_snapshot"] == old_session["split_group_snapshot"]
     assert session["split_group_snapshot"]["id"] == source["id"]
     assert manifest_split(session)["split"] == manifest_split(source)["split"]
@@ -322,7 +322,7 @@ def test_historical_receipt_survives_target_upgrade_and_derived_chain_keeps_orig
     for slot in ("baseline", "counterpart"):
         assert session[slot]["frames"] == old_session[slot]["frames"]
         assert session[slot]["retry_of_capture_id"] == old_session[slot]["id"]
-        assert session[slot]["result"]["verifier_version"] == "counterpart-verifier/2.3.0"
+        assert session[slot]["result"]["verifier_version"] == "counterpart-verifier/2.4.0"
     repo.publish(session["id"], session["revision"])
     archive = client.get(
         f"/api/sessions/{session['id']}/archive",
@@ -340,13 +340,13 @@ def test_historical_receipt_survives_target_upgrade_and_derived_chain_keeps_orig
 
 
 def test_current_version_source_cannot_create_another_automatic_clone(system):
-    created = saved_pair(system, recipe_version="2.3.0")
+    created = saved_pair(system, recipe_version="2.4.0")
     response = recheck(system, created)
     assert response.status_code == 409 and response.json()["detail"]["code"] == "recheck_ineligible"
     assert system[1].snapshot(created["session"]["id"]) == created["session"]
 
 
-@pytest.mark.parametrize("source_version", ["2.0.0", "2.1.0", "2.2.0"])
+@pytest.mark.parametrize("source_version", ["2.0.0", "2.1.0", "2.2.0", "2.3.0"])
 @pytest.mark.parametrize("flat", [True, False])
 def test_initial_saved_image_recheck_preserves_source_and_requires_physical_recovery(
     system, source_version, flat
@@ -354,7 +354,7 @@ def test_initial_saved_image_recheck_preserves_source_and_requires_physical_reco
     client, repo, _ = system
     created = saved_pair(system, recipe_version=source_version, initial_only=True, flat=flat)
     original = created["session"]
-    assert original["latest_capture"]["result"]["accepted"] is not flat
+    assert original["latest_capture"]["result"]["accepted"] is (not flat or source_version == "2.3.0")
     before = repo.evaluation_snapshot(original["id"])["captures"]
     body = arguments(created)
     response = recheck(system, created, body)
@@ -363,7 +363,7 @@ def test_initial_saved_image_recheck_preserves_source_and_requires_physical_reco
     session = derived["session"]
     assert session["id"] != original["id"]
     assert session["state"] == "baseline_ready"
-    assert session["recipe_snapshot"]["recipe_version"] == "2.3.0"
+    assert session["recipe_snapshot"]["recipe_version"] == "2.4.0"
     assert session["revision"] == 1 and session["recovery_required"] is True
     assert session["counterpart"] is None
     baseline = session["baseline"]
@@ -387,17 +387,19 @@ def test_initial_saved_image_recheck_preserves_source_and_requires_physical_reco
             uuid4().hex,
         )
     assert caught.value.code == "recovery_required"
-    replayed = evaluate(
-        baseline, session["recipe_snapshot"], None, media_reader=client.app.state.media.read
-    )
+    replayed = evaluate(baseline, session["recipe_snapshot"], None, media_reader=client.app.state.media.read)
     assert canonical(replayed) == canonical(baseline["result"])
     with repo._connection() as connection:
-        assert connection.execute(
-            "SELECT count(*) AS n FROM counterpart_budget_reservations"
-        ).fetchone()["n"] == 0
-        assert connection.execute(
-            "SELECT count(*) AS n FROM counterpart_jobs WHERE session_id=%s", (session["id"],)
-        ).fetchone()["n"] == 0
+        assert (
+            connection.execute("SELECT count(*) AS n FROM counterpart_budget_reservations").fetchone()["n"]
+            == 0
+        )
+        assert (
+            connection.execute(
+                "SELECT count(*) AS n FROM counterpart_jobs WHERE session_id=%s", (session["id"],)
+            ).fetchone()["n"]
+            == 0
+        )
     # Lost ACK recovers its exact child even if the parent is reset meanwhile.
     repo.reset_capture(original["id"], original["revision"], original["epoch"], uuid4().hex)
     recovered = recheck(system, created, body)
@@ -434,9 +436,12 @@ def test_initial_recheck_concurrent_receipts_create_one_child(system):
     assert len({row["session"]["id"] for row in results}) == 1
     with repo._connection() as connection:
         assert connection.execute("SELECT count(*) AS n FROM counterpart_sessions").fetchone()["n"] == 2
-        assert connection.execute(
-            "SELECT count(*) AS n FROM counterpart_events WHERE kind='saved_pair_rechecked'"
-        ).fetchone()["n"] == 1
+        assert (
+            connection.execute(
+                "SELECT count(*) AS n FROM counterpart_events WHERE kind='saved_pair_rechecked'"
+            ).fetchone()["n"]
+            == 1
+        )
 
 
 @pytest.mark.parametrize("field,code", [("expected_revision", "stale_revision"), ("epoch", "stale_epoch")])

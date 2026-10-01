@@ -449,11 +449,16 @@ export default function App() {
       (check.code === 'appearance_uncertain' && check.name.startsWith('appearance_continuity:'))
       || (check.code === 'registration_uncertain' && check.name.startsWith('background_registration:'))
     ));
+  const onlyLegacyBackgroundFailure = session?.recipe_snapshot?.recipe_version === '2.3.0'
+    && result?.outcome === 'fail' && unresolved.some(check => check.code === 'background_changed')
+    && unresolved.every(check =>
+      (check.outcome === 'fail' && check.code === 'background_changed' && check.name.startsWith('background_registration:'))
+      || (check.outcome === 'unknown' && check.code === 'appearance_uncertain' && check.name.startsWith('appearance_continuity:')));
   const savedRecheckAvailable = recheckEnabled && !complete && session?.mode === 'live'
     && !session.campaign_id && !humanRequired && !session.baseline_authorization
-    && ['2.0.0', '2.1.0', '2.2.0'].some(version => version === session.recipe_snapshot?.recipe_version)
-    && savedRecheckSource && latest?.status === 'rejected' && result?.outcome === 'unknown'
-    && !result.hard_error && onlyRecheckableUncertainty;
+    && ['2.0.0', '2.1.0', '2.2.0', '2.3.0'].some(version => version === session.recipe_snapshot?.recipe_version)
+    && savedRecheckSource && latest?.status === 'rejected'
+    && !result?.hard_error && ((result?.outcome === 'unknown' && onlyRecheckableUncertainty) || onlyLegacyBackgroundFailure);
   useEffect(() => {
     if (savedRecheckAvailable && !recheckFailed && !busy && !running && !pending && !resetIntent && pendingLoaded && network === 'online' && !needsResume.current && !camera.recording && recheckIntent.current?.sessionId !== session?.id) void recheckSaved();
   }, [savedRecheckAvailable, recheckFailed, session?.id, session?.revision, session?.epoch, busy, running, pending, resetIntent, pendingLoaded, network, camera.recording]);

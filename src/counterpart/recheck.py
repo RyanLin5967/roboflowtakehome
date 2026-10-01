@@ -25,9 +25,9 @@ from .repository import Conflict, Repository, _json
 from .splits import session_split_group, validate_split_group
 from .verification import verify
 
-TARGET_VERSION = "2.3.0"
-SOURCE_VERSIONS = frozenset({"2.0.0", "2.1.0", "2.2.0"})
-RECEIPT_VERSIONS = frozenset({"2.1.0", "2.2.0", "2.3.0"})
+TARGET_VERSION = "2.4.0"
+SOURCE_VERSIONS = frozenset({"2.0.0", "2.1.0", "2.2.0", "2.3.0"})
+RECEIPT_VERSIONS = frozenset({"2.1.0", "2.2.0", "2.3.0", "2.4.0"})
 
 
 def derived_token(parent_token: str, session_id: str, idempotency_key: str) -> str:

@@ -1,3 +1,41 @@
+# Urgent shadow false-rejection repair — 2026-10-01
+
+Current live recipe2.4 pins visual5/background2/appearance5. The2.3 repair was
+insufficient on fresh captures: CLAHE amplified weak edges into background failures,
+and broad cast shadows inflated appearance noise. All four new actual failed pairs
+68a318d4,32ff0f41,50d3beb0,44ac1fc9 now pass the new measured checks.
+
+Background2 requires unmatched edges to have original-pixel residual corroboration
+(at least8), retaining camera, coverage and localized-change controls. Appearance5
+estimates bounded smooth scalar illumination only from background pixels for noise
+and exposed-background comparisons; original object photometry remains preserved.
+New versioned tolerances: row-profile difference .15 (was .10), compositing residual
+.08 (was .06), stationary pixel difference .08 (was .06). This accommodates measured
+shadow variation; it is a calibrated tradeoff, not unchanged sensitivity. An initial
+candidate incorrectly admitted texture erasure and was rejected. A new required
+textured-to-flat mover-interior guard restores that refusal. All historical1–2.3
+contracts/results remain exact. No unknown-control waiver or manual review detour.
+
+Executed on final guarded candidate:18/18 expected saved physical outcomes,
+26/26 altered-original negatives blocked across old/new scenes,10/10 benign render
+variants accepted,84/84 historical decisions exact,all15 formerly accepted captures
+still accepted. These are repair/regression examples, not held-out accuracy.
+Browser recheck18/18 passed, including2.3 background-only failure upgrade and
+refusal to hide an independently moved reference. Version/recheck140 passed;
+appearance/background/version177 passed before final texture guard, with final
+saved probes rerun after it. Final guarded code:150 version/recheck/appearance tests passed,68 independent
+adversarial cases passed under visual5, and6 shadow/texture tests passed.
+
+2.3 background-only failures can automatically recheck exact saved photos into2.4;
+known other failures remain ineligible and original history is preserved. Serving
+http://127.0.0.1:8080,index-Mki1OUQX.js,API PID34976/exec59234,worker
+PID35406/exec44002. Both restarted after zero active jobs; health/recipe2.4 verified.
+Hard-refresh to recheck; a retained earlier failed request has Retry saved-photo check.
+No new provider calls,local ML or production evidence mutations from repair probes.
+Private evidence:artifacts/qa/background-repair/live-v24 and all-saved-live-v24.json.
+
+---
+
 # Plain-background collection repaired and running — 2026-10-01
 
 Live recipe/verifier 2.3.0 pins visual/appearance 4.0.0 and background 1.0.0.

@@ -23,6 +23,7 @@ VISUAL_VERSION = "counterpart-visual/1.0.0"
 REGISTERED_APPEARANCE_VISUAL_VERSION = "counterpart-visual/2.0.0"
 COMPOSITED_APPEARANCE_VISUAL_VERSION = "counterpart-visual/3.0.0"
 PLAIN_BACKGROUND_VISUAL_VERSION = "counterpart-visual/4.0.0"
+ROBUST_BACKGROUND_VISUAL_VERSION = "counterpart-visual/5.0.0"
 # An immutable contract is copied into recipe v2. A change needs a new version.
 VISUAL_THRESHOLDS = MappingProxyType(
     {
@@ -417,9 +418,13 @@ def evaluate_visual_controls(
         REGISTERED_APPEARANCE_VISUAL_VERSION,
         COMPOSITED_APPEARANCE_VISUAL_VERSION,
         PLAIN_BACKGROUND_VISUAL_VERSION,
+        ROBUST_BACKGROUND_VISUAL_VERSION,
     ):
         raise InvalidVisualEvidence("Unknown visual verification version.")
-    if version == PLAIN_BACKGROUND_VISUAL_VERSION and recipe not in ("spatial", "temporal"):
+    if version in (PLAIN_BACKGROUND_VISUAL_VERSION, ROBUST_BACKGROUND_VISUAL_VERSION) and recipe not in (
+        "spatial",
+        "temporal",
+    ):
         raise InvalidVisualEvidence("Unknown visual recipe family.")
     if not isinstance(frames, list) or not 1 <= len(frames) <= 48:
         raise InvalidVisualEvidence("Visual checks require one to 48 original images.")
@@ -441,8 +446,8 @@ def evaluate_visual_controls(
                 "frame_index": index,
             }
         )
-        if version == PLAIN_BACKGROUND_VISUAL_VERSION:
-            from .background import compare_background
+        if version in (PLAIN_BACKGROUND_VISUAL_VERSION, ROBUST_BACKGROUND_VISUAL_VERSION):
+            from .background import BACKGROUND_V2_VERSION, BACKGROUND_VERSION, compare_background
 
             registration, transform = compare_background(
                 reference,
@@ -451,6 +456,9 @@ def evaluate_visual_controls(
                 moving_labels=(object_a, object_b) if recipe == "temporal" else (object_a,),
                 controlled_labels=(object_a, object_b, *protected_objects),
                 registration=_registration,
+                version=BACKGROUND_V2_VERSION
+                if version == ROBUST_BACKGROUND_VISUAL_VERSION
+                else BACKGROUND_VERSION,
             )
         else:
             registration, transform = _registration(reference, current, index)
@@ -460,20 +468,29 @@ def evaluate_visual_controls(
                 REGISTERED_APPEARANCE_VISUAL_VERSION,
                 COMPOSITED_APPEARANCE_VISUAL_VERSION,
                 PLAIN_BACKGROUND_VISUAL_VERSION,
+                ROBUST_BACKGROUND_VISUAL_VERSION,
             ):
                 from .appearance import APPEARANCE_VERSION, compare_appearance
 
                 appearance_version = APPEARANCE_VERSION
                 corrected_comparison = None
-                if version in (COMPOSITED_APPEARANCE_VISUAL_VERSION, PLAIN_BACKGROUND_VISUAL_VERSION):
+                if version in (
+                    COMPOSITED_APPEARANCE_VISUAL_VERSION,
+                    PLAIN_BACKGROUND_VISUAL_VERSION,
+                    ROBUST_BACKGROUND_VISUAL_VERSION,
+                ):
                     from .appearance import APPEARANCE_V3_VERSION
 
                     appearance_version = APPEARANCE_V3_VERSION
                     appearance_options = {}
-                    if version == PLAIN_BACKGROUND_VISUAL_VERSION:
+                    if version in (PLAIN_BACKGROUND_VISUAL_VERSION, ROBUST_BACKGROUND_VISUAL_VERSION):
                         from .appearance import APPEARANCE_V4_VERSION
 
                         appearance_version = APPEARANCE_V4_VERSION
+                        if version == ROBUST_BACKGROUND_VISUAL_VERSION:
+                            from .appearance import APPEARANCE_V5_VERSION
+
+                            appearance_version = APPEARANCE_V5_VERSION
                         appearance_options["background_labels"] = (object_a, object_b, *protected_objects)
                         appearance_options["allow_partial_overlap"] = recipe == "temporal" and label in (
                             object_a,
@@ -532,6 +549,7 @@ def evaluate_visual_controls(
         REGISTERED_APPEARANCE_VISUAL_VERSION,
         COMPOSITED_APPEARANCE_VISUAL_VERSION,
         PLAIN_BACKGROUND_VISUAL_VERSION,
+        ROBUST_BACKGROUND_VISUAL_VERSION,
     ):
         if version == REGISTERED_APPEARANCE_VISUAL_VERSION:
             from .appearance import APPEARANCE_METHOD, APPEARANCE_THRESHOLDS, APPEARANCE_VERSION
@@ -544,18 +562,29 @@ def evaluate_visual_controls(
             from .appearance import APPEARANCE_V4_THRESHOLDS as APPEARANCE_THRESHOLDS
             from .appearance import APPEARANCE_V4_VERSION as APPEARANCE_VERSION
 
+        if version == ROBUST_BACKGROUND_VISUAL_VERSION:
+            from .appearance import APPEARANCE_V5_METHOD as APPEARANCE_METHOD
+            from .appearance import APPEARANCE_V5_THRESHOLDS as APPEARANCE_THRESHOLDS
+            from .appearance import APPEARANCE_V5_VERSION as APPEARANCE_VERSION
+
         result["evidence"]["appearance"] = {
             "version": APPEARANCE_VERSION,
             "method": APPEARANCE_METHOD,
             "thresholds": dict(APPEARANCE_THRESHOLDS),
         }
-    if version == PLAIN_BACKGROUND_VISUAL_VERSION:
+    if version in (PLAIN_BACKGROUND_VISUAL_VERSION, ROBUST_BACKGROUND_VISUAL_VERSION):
         from .background import (
             BACKGROUND_LIMITATIONS,
             BACKGROUND_METHOD,
             BACKGROUND_THRESHOLDS,
             BACKGROUND_VERSION,
         )
+
+        if version == ROBUST_BACKGROUND_VISUAL_VERSION:
+            from .background import BACKGROUND_V2_LIMITATIONS as BACKGROUND_LIMITATIONS
+            from .background import BACKGROUND_V2_METHOD as BACKGROUND_METHOD
+            from .background import BACKGROUND_V2_THRESHOLDS as BACKGROUND_THRESHOLDS
+            from .background import BACKGROUND_V2_VERSION as BACKGROUND_VERSION
 
         result["evidence"]["registration_model"] = BACKGROUND_METHOD
         result["evidence"]["background"] = {

@@ -1168,7 +1168,7 @@ def verify(
         reason = next(c for c in required_checks if c["outcome"] == result["outcome"])
         result["code"] = reason.get("code", result["code"])
         result["message"] = reason["detail"]
-    if snapshot["recipe_version"] in ("2.1.0", "2.2.0", "2.3.0"):
+    if snapshot["recipe_version"] in ("2.1.0", "2.2.0", "2.3.0", "2.4.0"):
         # JSONB canonicalizes -0.0 to +0.0. Emit the same finite value so an
         # independent replay has byte-identical canonical JSON after storage.
         # Historical versions keep their original serialized decisions exactly.
